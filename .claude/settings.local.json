@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Force \"c:\\\\Users\\\\Guilherme\\\\Desktop\\\\Arquivos\\\\Pessoais\\\\Projetos Devs\\\\emprestimos-system\")"
+    ]
+  }
+}

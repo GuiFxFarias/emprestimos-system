@@ -1,0 +1,319 @@
+'use client'
+
+import { memo, useState } from 'react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { AlertCircle, CheckCircle2, Clock, CreditCard, TrendingUp, Pencil, MessageSquarePlus, Trash2, Loader2 } from 'lucide-react'
+import { formatBRL, formatDate } from '@/lib/format'
+import type { EmprestimoCalculado, Pagamento, AnotacaoEmprestimo } from '@/lib/types'
+
+interface Props {
+  e: EmprestimoCalculado
+  pagamentos: Pagamento[]
+  anotacoes: AnotacaoEmprestimo[]
+  onPagamento: () => void
+  onEdit: () => void
+  onAddAnotacao: (texto: string) => Promise<void>
+  onDeleteAnotacao: (id: string) => Promise<void>
+  hoje: string
+}
+
+interface TimelineItem {
+  date: string
+  label: string
+  value?: number
+  type: 'criado' | 'pagamento' | 'vencimento' | 'quitado'
+}
+
+export const EmprestimoTimeline = memo(function EmprestimoTimeline({
+  e, pagamentos, anotacoes, onPagamento, onEdit, onAddAnotacao, onDeleteAnotacao, hoje,
+}: Props) {
+  const [novaAnotacao, setNovaAnotacao] = useState('')
+  const [savingAnotacao, setSavingAnotacao] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  const venceHoje = e.situacao === 'em_dia' && e.data_vencimento === hoje
+  const atrasado = e.situacao === 'atrasado'
+  const quitado = e.status === 'quitado'
+
+  const borderClass = atrasado ? 'pulse-danger' : ''
+  const borderColor = atrasado
+    ? 'rgba(255,84,112,0.5)'
+    : venceHoje
+    ? 'var(--destructive)'
+    : quitado
+    ? 'rgba(0,229,204,0.3)'
+    : 'var(--border)'
+
+  const timelineItems: TimelineItem[] = [
+    {
+      date: e.data_emprestimo,
+      label: `Empréstimo de ${formatBRL(e.valor_principal)} (${e.taxa_juros}% juros, ${e.prazo_dias}d)`,
+      value: e.valor_principal,
+      type: 'criado',
+    },
+    ...pagamentos.map(p => ({
+      date: p.data_pagamento,
+      label: p.tipo === 'quitacao' ? `Quitação — ${formatBRL(p.valor)}` : `Pagamento parcial — ${formatBRL(p.valor)}`,
+      value: p.valor,
+      type: (p.tipo === 'quitacao' ? 'quitado' : 'pagamento') as TimelineItem['type'],
+    })),
+  ]
+
+  if (quitado && e.data_quitacao) {
+    const alreadyHasQuitacao = pagamentos.some(p => p.tipo === 'quitacao')
+    if (!alreadyHasQuitacao) {
+      timelineItems.push({
+        date: e.data_quitacao,
+        label: `Quitado — ${formatBRL(e.valor_quitado ?? 0)}`,
+        type: 'quitado',
+      })
+    }
+  } else {
+    timelineItems.push({
+      date: e.data_vencimento,
+      label: venceHoje
+        ? `Vence hoje — ${formatBRL(e.valor_total_devido)}`
+        : atrasado
+        ? `Venceu — ${e.dias_atraso}d de atraso — ${formatBRL(e.valor_total_devido)}`
+        : `Vence em ${formatDate(e.data_vencimento)} — ${formatBRL(e.valor_no_vencimento)}`,
+      type: 'vencimento',
+    })
+  }
+
+  timelineItems.sort((a, b) => a.date.localeCompare(b.date))
+
+  const dotColor = (type: TimelineItem['type']) => {
+    if (type === 'criado') return 'var(--primary)'
+    if (type === 'quitado') return '#00e5cc'
+    if (type === 'pagamento') return 'var(--warning)'
+    if (type === 'vencimento') {
+      if (atrasado || venceHoje) return 'var(--destructive)'
+      return 'var(--muted-foreground)'
+    }
+    return 'var(--muted-foreground)'
+  }
+
+  const dotIcon = (type: TimelineItem['type']) => {
+    if (type === 'criado') return <TrendingUp className="w-3 h-3" />
+    if (type === 'quitado') return <CheckCircle2 className="w-3 h-3" />
+    if (type === 'pagamento') return <CreditCard className="w-3 h-3" />
+    if (type === 'vencimento' && (atrasado || venceHoje)) return <AlertCircle className="w-3 h-3" />
+    return <Clock className="w-3 h-3" />
+  }
+
+  const situacaoColor = atrasado
+    ? 'var(--destructive)'
+    : venceHoje
+    ? 'var(--destructive)'
+    : quitado
+    ? '#00e5cc'
+    : 'var(--primary)'
+
+  const situacaoLabel = atrasado
+    ? `Atrasado ${e.dias_atraso}d`
+    : venceHoje
+    ? 'Vence hoje'
+    : quitado
+    ? 'Quitado'
+    : 'Em dia'
+
+  async function handleAddAnotacao() {
+    const texto = novaAnotacao.trim()
+    if (!texto) return
+    setSavingAnotacao(true)
+    await onAddAnotacao(texto)
+    setNovaAnotacao('')
+    setSavingAnotacao(false)
+  }
+
+  async function handleDeleteAnotacao(id: string) {
+    setDeletingId(id)
+    await onDeleteAnotacao(id)
+    setDeletingId(null)
+  }
+
+  const anotacoesOrdenadas = [...anotacoes].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  )
+
+  return (
+    <div
+      className={`rounded-2xl border p-4 ${borderClass}`}
+      style={{ background: 'var(--card)', borderColor }}
+    >
+      {/* Header */}
+      <div className="flex items-start justify-between gap-2 mb-4">
+        <div>
+          <p className="font-semibold text-sm" style={{ color: 'var(--foreground)' }}>
+            {formatBRL(e.valor_principal)}
+            <span className="font-normal text-xs ml-1.5" style={{ color: 'var(--muted-foreground)' }}>
+              principal · {e.taxa_juros}% juros
+            </span>
+          </p>
+          {!quitado && (
+            <p className="text-lg font-bold mt-0.5" style={{ color: situacaoColor }}>
+              {formatBRL(e.valor_total_devido)}
+              <span className="text-xs font-normal ml-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                devido hoje
+              </span>
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Badge
+            className="text-xs"
+            style={{ background: `${situacaoColor}20`, color: situacaoColor, border: 'none' }}
+          >
+            {atrasado && <AlertCircle className="w-3 h-3 mr-1" />}
+            {quitado && <CheckCircle2 className="w-3 h-3 mr-1" />}
+            {situacaoLabel}
+          </Badge>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onEdit}
+            className="h-7 w-7 hover:bg-primary/10"
+            style={{ color: 'var(--muted-foreground)' }}
+          >
+            <Pencil className="w-3.5 h-3.5" />
+          </Button>
+          {!quitado && (
+            <Button
+              size="sm"
+              onClick={onPagamento}
+              className="text-xs font-semibold h-7 px-3 hover:brightness-110 active:scale-95"
+              style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+            >
+              Pagar
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Timeline */}
+      <div className="relative pl-5">
+        <div
+          className="absolute left-[7px] top-2 bottom-2 w-px"
+          style={{ background: 'var(--border)' }}
+        />
+        {timelineItems.map((item, idx) => {
+          const isLast = idx === timelineItems.length - 1
+          const color = dotColor(item.type)
+          const isFutureVencimento = item.type === 'vencimento' && !atrasado && !venceHoje && !quitado
+
+          return (
+            <div key={idx} className={`relative flex items-start gap-3 ${isLast ? '' : 'mb-3'}`}>
+              <div
+                className="absolute left-[-13px] w-[15px] h-[15px] rounded-full flex items-center justify-center shrink-0 mt-0.5 z-10"
+                style={{
+                  background: isFutureVencimento ? 'var(--muted)' : color,
+                  border: isFutureVencimento ? `2px solid ${color}` : 'none',
+                  color: isFutureVencimento ? color : '#040d1f',
+                }}
+              >
+                <span style={{ color: isFutureVencimento ? color : '#040d1f' }}>
+                  {dotIcon(item.type)}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <p
+                  className="text-xs"
+                  style={{
+                    color: isLast && (atrasado || venceHoje) ? 'var(--destructive)' : isLast && quitado ? '#00e5cc' : 'var(--foreground)',
+                    fontWeight: isLast ? 600 : 400,
+                  }}
+                >
+                  {item.label}
+                </p>
+                <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                  {formatDate(item.date)}
+                </p>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Mora info */}
+      {e.valor_mora > 0 && !quitado && (
+        <div className="mt-3 pt-3 border-t flex items-center gap-4" style={{ borderColor: 'var(--border)' }}>
+          <span className="text-xs" style={{ color: 'var(--destructive)' }}>
+            Mora: {formatBRL(e.valor_mora)}
+          </span>
+        </div>
+      )}
+
+      {/* Anotações */}
+      <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex items-center gap-1.5 mb-3">
+          <MessageSquarePlus className="w-3.5 h-3.5" style={{ color: 'var(--muted-foreground)' }} />
+          <span className="text-xs font-semibold" style={{ color: 'var(--muted-foreground)' }}>
+            Anotações {anotacoes.length > 0 && `(${anotacoes.length})`}
+          </span>
+        </div>
+
+        {/* Input nova anotação */}
+        <div className="flex gap-2 mb-3">
+          <Textarea
+            rows={2}
+            value={novaAnotacao}
+            onChange={e => setNovaAnotacao(e.target.value)}
+            placeholder="Adicionar anotação..."
+            className="text-xs resize-none"
+            style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleAddAnotacao()
+            }}
+          />
+          <Button
+            size="sm"
+            disabled={!novaAnotacao.trim() || savingAnotacao}
+            onClick={handleAddAnotacao}
+            className="self-end shrink-0 h-8 px-3 text-xs font-semibold"
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+          >
+            {savingAnotacao ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Salvar'}
+          </Button>
+        </div>
+
+        {/* Lista de anotações */}
+        {anotacoesOrdenadas.length > 0 && (
+          <div className="flex flex-col gap-2">
+            {anotacoesOrdenadas.map(a => (
+              <div
+                key={a.id}
+                className="rounded-xl px-3 py-2 flex items-start gap-2 group"
+                style={{ background: 'var(--muted)' }}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs" style={{ color: 'var(--foreground)', whiteSpace: 'pre-wrap' }}>
+                    {a.texto}
+                  </p>
+                  <p className="text-[10px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                    {new Date(a.created_at).toLocaleString('pt-BR', {
+                      day: '2-digit', month: '2-digit', year: 'numeric',
+                      hour: '2-digit', minute: '2-digit',
+                    })}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleDeleteAnotacao(a.id)}
+                  disabled={deletingId === a.id}
+                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/10"
+                  style={{ color: 'var(--destructive)' }}
+                >
+                  {deletingId === a.id
+                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : <Trash2 className="w-3 h-3" />
+                  }
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+})

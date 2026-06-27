@@ -1,0 +1,21 @@
+import { createClient } from '@/lib/supabase/server'
+import type { EmprestimoCalculado, Cliente, Configuracoes } from '@/lib/types'
+
+export async function serverFetchEmprestimosCalculados(): Promise<EmprestimoCalculado[]> {
+  const supabase = await createClient()
+  const { data } = await supabase.from('emprestimos_calculados').select('*')
+  return (data ?? []) as EmprestimoCalculado[]
+}
+
+export async function serverFetchClientes(): Promise<Cliente[]> {
+  const supabase = await createClient()
+  const { data } = await supabase.from('clientes').select('*').order('nome')
+  return (data ?? []) as Cliente[]
+}
+
+export async function serverFetchConfiguracoes(): Promise<Configuracoes | null> {
+  const supabase = await createClient()
+  const { data, error } = await supabase.from('configuracoes').select('*').single()
+  if (error) return null
+  return data as Configuracoes
+}
