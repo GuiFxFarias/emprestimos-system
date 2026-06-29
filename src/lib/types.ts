@@ -63,6 +63,7 @@ export interface EmprestimoCalculado {
   valor_juros: number
   valor_no_vencimento: number
   dias_atraso: number
+  periodos_atraso: number
   valor_multa: number
   valor_mora: number
   situacao: Situacao

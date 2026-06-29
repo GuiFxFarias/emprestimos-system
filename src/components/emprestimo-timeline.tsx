@@ -37,6 +37,14 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
   const atrasado = e.situacao === 'atrasado'
   const quitado = e.status === 'quitado'
 
+  const totalPago = pagamentos
+    .filter(p => p.tipo === 'parcial')
+    .reduce((sum, p) => sum + p.valor, 0)
+  const saldoDevedor = Math.round(Math.max(0, e.valor_total_devido - totalPago) * 100) / 100
+  const jurosRenovacoes = e.periodos_atraso > 0
+    ? Math.round(e.valor_juros * e.periodos_atraso * 100) / 100
+    : 0
+
   const borderClass = atrasado ? 'pulse-danger' : ''
   const borderColor = atrasado
     ? 'rgba(255,84,112,0.5)'
@@ -154,9 +162,9 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
           </p>
           {!quitado && (
             <p className="text-lg font-bold mt-0.5" style={{ color: situacaoColor }}>
-              {formatBRL(e.valor_total_devido)}
+              {formatBRL(saldoDevedor)}
               <span className="text-xs font-normal ml-1.5" style={{ color: 'var(--muted-foreground)' }}>
-                devido hoje
+                {totalPago > 0 ? 'saldo devedor' : 'devido hoje'}
               </span>
             </p>
           )}
@@ -192,10 +200,80 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
         </div>
       </div>
 
+      {/* Breakdown principal / juros / mora / pago */}
+      {!quitado && (
+        <div className="mb-4 rounded-xl overflow-hidden text-xs" style={{ background: 'var(--muted)' }}>
+          <div className="px-3 py-2.5 flex flex-col gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <span style={{ color: 'var(--muted-foreground)' }}>Principal</span>
+              <span style={{ color: 'var(--foreground)', fontWeight: 500 }}>{formatBRL(e.valor_principal)}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span style={{ color: 'var(--muted-foreground)' }}>Juros ({e.taxa_juros}%)</span>
+              <span style={{ color: 'var(--primary)' }}>+ {formatBRL(e.valor_juros)}</span>
+            </div>
+            {jurosRenovacoes > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span style={{ color: 'var(--muted-foreground)' }}>
+                  Renovação ({e.periodos_atraso}× {e.taxa_juros}%)
+                </span>
+                <span style={{ color: 'var(--destructive)' }}>+ {formatBRL(jurosRenovacoes)}</span>
+              </div>
+            )}
+            {e.valor_mora > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span style={{ color: 'var(--muted-foreground)' }}>
+                  Mora ({(e.dias_atraso % e.prazo_dias)}d × {formatBRL(e.juros_mora_diario_reais)}/d)
+                </span>
+                <span style={{ color: 'var(--destructive)' }}>+ {formatBRL(e.valor_mora)}</span>
+              </div>
+            )}
+            {totalPago > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span style={{ color: 'var(--muted-foreground)' }}>Já pago</span>
+                <span style={{ color: '#00e5cc' }}>− {formatBRL(totalPago)}</span>
+              </div>
+            )}
+          </div>
+          <div
+            className="px-3 py-2 border-t flex items-center gap-1.5"
+            style={{ borderColor: 'var(--border)', background: `${situacaoColor}12` }}
+          >
+            <span className="text-xs font-semibold" style={{ color: situacaoColor }}>
+              {totalPago > 0 ? 'Saldo devedor' : 'Total devido'}
+            </span>
+            <span className="text-sm font-bold" style={{ color: situacaoColor }}>
+              {formatBRL(saldoDevedor)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Contador de atraso */}
+      {atrasado && (
+        <div
+          className="mb-4 rounded-xl px-4 py-3 flex items-center gap-3"
+          style={{
+            background: 'rgba(255,84,112,0.08)',
+            borderLeft: '3px solid var(--destructive)',
+          }}
+        >
+          <span
+            className="text-4xl font-bold tabular-nums leading-none"
+            style={{ color: 'var(--destructive)' }}
+          >
+            {e.dias_atraso}
+          </span>
+          <span className="text-xs font-medium leading-tight" style={{ color: 'var(--destructive)' }}>
+            dias<br />de atraso
+          </span>
+        </div>
+      )}
+
       {/* Timeline */}
       <div className="relative pl-5">
         <div
-          className="absolute left-[7px] top-2 bottom-2 w-px"
+          className="absolute left-1.75 top-2 bottom-2 w-px"
           style={{ background: 'var(--border)' }}
         />
         {timelineItems.map((item, idx) => {
@@ -206,7 +284,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
           return (
             <div key={idx} className={`relative flex items-start gap-3 ${isLast ? '' : 'mb-3'}`}>
               <div
-                className="absolute left-[-13px] w-[15px] h-[15px] rounded-full flex items-center justify-center shrink-0 mt-0.5 z-10"
+                className="absolute -left-3.25 w-3.75 h-3.75 rounded-full flex items-center justify-center shrink-0 mt-0.5 z-10"
                 style={{
                   background: isFutureVencimento ? 'var(--muted)' : color,
                   border: isFutureVencimento ? `2px solid ${color}` : 'none',
@@ -235,15 +313,6 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
           )
         })}
       </div>
-
-      {/* Mora info */}
-      {e.valor_mora > 0 && !quitado && (
-        <div className="mt-3 pt-3 border-t flex items-center gap-4" style={{ borderColor: 'var(--border)' }}>
-          <span className="text-xs" style={{ color: 'var(--destructive)' }}>
-            Mora: {formatBRL(e.valor_mora)}
-          </span>
-        </div>
-      )}
 
       {/* Anotações */}
       <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border)' }}>
