@@ -147,18 +147,20 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
       if (!pagamentoEmp) return
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
+      const tipo = values.destino === 'quitacao' ? 'quitacao' : 'parcial'
 
       const { error: pagError } = await supabase.from('pagamentos').insert({
         owner_id: user!.id,
         emprestimo_id: pagamentoEmp.id,
         valor: values.valor,
         data_pagamento: values.data_pagamento,
-        tipo: values.tipo,
+        tipo,
+        destino: values.destino,
         observacoes: values.observacoes || null,
       })
       if (pagError) throw new Error(pagError.message)
 
-      if (values.tipo === 'quitacao') {
+      if (values.destino === 'quitacao') {
         const { error: updError } = await supabase.from('emprestimos').update({
           status: 'quitado',
           data_quitacao: values.data_pagamento,
@@ -168,7 +170,13 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
       }
     },
     onSuccess: (_, values) => {
-      toast.success(values.tipo === 'quitacao' ? 'Empréstimo quitado!' : 'Pagamento registrado!')
+      const msgs: Record<string, string> = {
+        quitacao: 'Empréstimo quitado!',
+        principal: 'Pagamento do principal registrado!',
+        juros: 'Pagamento dos juros registrado!',
+        atraso: 'Pagamento da mora registrado!',
+      }
+      toast.success(msgs[values.destino] ?? 'Pagamento registrado!')
       setPagamentoEmp(null)
       invalidateAll()
     },

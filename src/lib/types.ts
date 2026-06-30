@@ -1,5 +1,6 @@
 export type EmprestimoStatus = 'ativo' | 'quitado'
 export type PagamentoTipo = 'parcial' | 'quitacao'
+export type PagamentoDestino = 'atraso' | 'juros' | 'principal' | 'quitacao'
 export type Situacao = 'em_dia' | 'atrasado' | 'quitado'
 
 export interface Cliente {
@@ -77,6 +78,7 @@ export interface Pagamento {
   valor: number
   data_pagamento: string
   tipo: PagamentoTipo
+  destino: PagamentoDestino | null
   observacoes: string | null
   created_at: string
 }
