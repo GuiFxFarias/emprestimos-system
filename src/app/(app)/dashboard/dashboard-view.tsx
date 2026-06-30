@@ -3,7 +3,7 @@
 import { useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import { useQuery } from '@tanstack/react-query'
-import { queryKeys, fetchEmprestimosCalculados } from '@/lib/queries'
+import { queryKeys, fetchEmprestimosCalculados, fetchAllPagamentos, type PagamentoResumo } from '@/lib/queries'
 import { formatBRL, formatDate } from '@/lib/format'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
@@ -32,11 +32,23 @@ const BarChartMensal = dynamic(
   { ssr: false, loading: () => <Skeleton className="h-24 w-full rounded-xl" style={{ background: 'var(--muted)' }} /> }
 )
 
-export function DashboardView({ initialEmprestimos }: { initialEmprestimos: EmprestimoCalculado[] }) {
+export function DashboardView({
+  initialEmprestimos,
+  initialPagamentos,
+}: {
+  initialEmprestimos: EmprestimoCalculado[]
+  initialPagamentos: PagamentoResumo[]
+}) {
   const { data: emprestimos = [], isLoading } = useQuery({
     queryKey: queryKeys.emprestimosCalculados(),
     queryFn: fetchEmprestimosCalculados,
     initialData: initialEmprestimos,
+  })
+
+  const { data: pagamentos = [] } = useQuery({
+    queryKey: queryKeys.pagamentos(),
+    queryFn: fetchAllPagamentos,
+    initialData: initialPagamentos,
   })
 
   const { ativos, quitados, atrasados } = useMemo(() => ({
@@ -45,45 +57,66 @@ export function DashboardView({ initialEmprestimos }: { initialEmprestimos: Empr
     atrasados: emprestimos.filter(e => e.situacao === 'atrasado'),
   }), [emprestimos])
 
-  const metrics = useMemo(() => [
-    {
-      label: 'Capital ativo',
-      value: formatBRL(ativos.reduce((s, e) => s + e.valor_principal, 0)),
-      icon: <Wallet className="w-5 h-5" />,
-      color: 'var(--primary)',
-    },
-    {
-      label: 'Carteira a receber',
-      value: formatBRL(ativos.reduce((s, e) => s + e.valor_total_devido, 0)),
-      icon: <TrendingUp className="w-5 h-5" />,
-      color: '#00e5cc',
-    },
-    {
-      label: 'Juros a receber',
-      value: formatBRL(ativos.reduce((s, e) => s + e.valor_juros, 0)),
-      icon: <DollarSign className="w-5 h-5" />,
-      color: '#00e5cc',
-    },
-    {
-      label: 'Em atraso',
-      value: formatBRL(atrasados.reduce((s, e) => s + e.valor_total_devido, 0)),
-      sub: `${atrasados.length} empréstimo${atrasados.length !== 1 ? 's' : ''}`,
-      icon: <AlertCircle className="w-5 h-5" />,
-      color: 'var(--destructive)',
-    },
-    {
-      label: 'Total recebido',
-      value: formatBRL(quitados.reduce((s, e) => s + (e.valor_quitado ?? 0), 0)),
-      icon: <CheckCircle2 className="w-5 h-5" />,
-      color: '#00e5cc',
-    },
-    {
-      label: 'Lucro realizado',
-      value: formatBRL(quitados.reduce((s, e) => s + ((e.valor_quitado ?? 0) - e.valor_principal), 0)),
-      icon: <ArrowUp className="w-5 h-5" />,
-      color: '#00e5cc',
-    },
-  ], [ativos, quitados, atrasados])
+  const metrics = useMemo(() => {
+    // IDs dos empréstimos quitados para filtrar pagamentos
+    const quitadosIds = new Set(quitados.map(e => e.id))
+
+    // Total recebido = soma de TODOS os pagamentos já realizados
+    const totalRecebido = pagamentos.reduce((s, p) => s + p.valor, 0)
+
+    // Lucro = tudo que recebeu de empréstimos quitados − o capital desses empréstimos
+    const recebidoDeQuitados = pagamentos
+      .filter(p => quitadosIds.has(p.emprestimo_id))
+      .reduce((s, p) => s + p.valor, 0)
+    const capitalQuitados = quitados.reduce((s, e) => s + e.valor_principal, 0)
+    const lucro = recebidoDeQuitados - capitalQuitados
+
+    // Juros a receber = tudo acima do principal (juros de todos os períodos + mora)
+    const jurosAReceber = ativos.reduce(
+      (s, e) => s + e.valor_total_devido - e.valor_principal - e.valor_mora,
+      0
+    )
+
+    return [
+      {
+        label: 'Capital ativo',
+        value: formatBRL(ativos.reduce((s, e) => s + e.valor_principal, 0)),
+        icon: <Wallet className="w-5 h-5" />,
+        color: 'var(--primary)',
+      },
+      {
+        label: 'Carteira a receber',
+        value: formatBRL(ativos.reduce((s, e) => s + e.valor_total_devido, 0)),
+        icon: <TrendingUp className="w-5 h-5" />,
+        color: '#00e5cc',
+      },
+      {
+        label: 'Juros a receber',
+        value: formatBRL(jurosAReceber),
+        icon: <DollarSign className="w-5 h-5" />,
+        color: '#00e5cc',
+      },
+      {
+        label: 'Em atraso',
+        value: formatBRL(atrasados.reduce((s, e) => s + e.valor_total_devido, 0)),
+        sub: `${atrasados.length} empréstimo${atrasados.length !== 1 ? 's' : ''}`,
+        icon: <AlertCircle className="w-5 h-5" />,
+        color: 'var(--destructive)',
+      },
+      {
+        label: 'Total recebido',
+        value: formatBRL(totalRecebido),
+        icon: <CheckCircle2 className="w-5 h-5" />,
+        color: '#00e5cc',
+      },
+      {
+        label: 'Lucro realizado',
+        value: formatBRL(lucro),
+        icon: <ArrowUp className="w-5 h-5" />,
+        color: '#00e5cc',
+      },
+    ]
+  }, [ativos, quitados, atrasados, pagamentos])
 
   const donutData = useMemo(() => [
     { name: 'Em dia', value: ativos.filter(e => e.situacao === 'em_dia').length, color: 'var(--primary)' },

@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import { Loader2 } from 'lucide-react'
 import { formatBRL } from '@/lib/format'
-import type { EmprestimoCalculado } from '@/lib/types'
+import type { EmprestimoCalculado, Pagamento } from '@/lib/types'
 
 type Destino = 'atraso' | 'juros' | 'principal' | 'quitacao'
 
@@ -30,23 +30,49 @@ const schema = z.object({
 
 export type PagamentoFormValues = z.infer<typeof schema>
 
-function getMax(destino: Destino, emp: EmprestimoCalculado): number {
-  switch (destino) {
-    case 'atraso': return emp.valor_mora
-    case 'juros': return Number((emp.valor_juros * (1 + emp.periodos_atraso)).toFixed(2))
-    case 'principal': return emp.valor_principal
-    case 'quitacao': return emp.valor_total_devido
+function somarPorDestino(pagamentos: Pagamento[], destino: Destino): number {
+  return pagamentos
+    .filter(p => p.destino === destino)
+    .reduce((s, p) => s + p.valor, 0)
+}
+
+interface Restantes {
+  principal: number
+  juros: number
+  atraso: number
+  total: number
+  pagoJuros: number
+  pagoAtraso: number
+  pagoPrincipal: number
+}
+
+function calcularRestantes(emp: EmprestimoCalculado, pagamentos: Pagamento[]): Restantes {
+  const jurosTotal = Number((emp.valor_juros * (1 + emp.periodos_atraso)).toFixed(2))
+  const pagoJuros = somarPorDestino(pagamentos, 'juros')
+  const pagoAtraso = somarPorDestino(pagamentos, 'atraso')
+  const pagoPrincipal = somarPorDestino(pagamentos, 'principal')
+  const pagoTotal = pagoJuros + pagoAtraso + pagoPrincipal
+
+  return {
+    principal: Math.max(0, Number((emp.valor_principal - pagoPrincipal).toFixed(2))),
+    juros: Math.max(0, Number((jurosTotal - pagoJuros).toFixed(2))),
+    atraso: Math.max(0, Number((emp.valor_mora - pagoAtraso).toFixed(2))),
+    total: Math.max(0, Number((emp.valor_total_devido - pagoTotal).toFixed(2))),
+    pagoJuros,
+    pagoAtraso,
+    pagoPrincipal,
   }
 }
 
 interface Props {
   emprestimo: EmprestimoCalculado | null
+  pagamentos: Pagamento[]
   onClose: () => void
   onSubmit: (values: PagamentoFormValues) => Promise<void>
   saving: boolean
 }
 
-export function PagamentoDialog({ emprestimo, onClose, onSubmit, saving }: Props) {
+export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, saving }: Props) {
   const [destino, setDestino] = useState<Destino>('quitacao')
 
   const form = useForm<PagamentoFormValues>({
@@ -61,10 +87,11 @@ export function PagamentoDialog({ emprestimo, onClose, onSubmit, saving }: Props
 
   useEffect(() => {
     if (!emprestimo) return
+    const r = calcularRestantes(emprestimo, pagamentos)
     setDestino('quitacao')
     form.reset({
       destino: 'quitacao',
-      valor: emprestimo.valor_total_devido,
+      valor: r.total,
       data_pagamento: new Date().toISOString().slice(0, 10),
       observacoes: '',
     })
@@ -72,15 +99,26 @@ export function PagamentoDialog({ emprestimo, onClose, onSubmit, saving }: Props
 
   if (!emprestimo) return null
 
-  const maxValor = getMax(destino, emprestimo)
+  const r = calcularRestantes(emprestimo, pagamentos)
+  const jurosTotal = Number((emprestimo.valor_juros * (1 + emprestimo.periodos_atraso)).toFixed(2))
+
+  function getRestante(d: Destino): number {
+    switch (d) {
+      case 'atraso': return r.atraso
+      case 'juros': return r.juros
+      case 'principal': return r.principal
+      case 'quitacao': return r.total
+    }
+  }
+
+  const maxValor = getRestante(destino)
   const isQuitacao = destino === 'quitacao'
   const temAtraso = emprestimo.dias_atraso > 0 && emprestimo.valor_mora > 0
-  const jurosTotal = Number((emprestimo.valor_juros * (1 + emprestimo.periodos_atraso)).toFixed(2))
 
   function handleDestinoChange(newDestino: Destino) {
     setDestino(newDestino)
     form.setValue('destino', newDestino)
-    form.setValue('valor', getMax(newDestino, emprestimo!))
+    form.setValue('valor', getRestante(newDestino))
     form.clearErrors('valor')
   }
 
@@ -98,35 +136,47 @@ export function PagamentoDialog({ emprestimo, onClose, onSubmit, saving }: Props
 
         {/* Breakdown */}
         <div className="rounded-xl p-3 border" style={{ background: 'rgba(0,229,204,0.05)', borderColor: 'rgba(0,229,204,0.2)' }}>
-          <p className="text-xs font-semibold mb-2" style={{ color: 'var(--muted-foreground)' }}>Resumo da dívida</p>
+          <p className="text-xs font-semibold mb-2" style={rowStyle}>Resumo da dívida</p>
           <div className="flex flex-col gap-1">
-            <div className="flex justify-between text-sm">
-              <span style={rowStyle}>Principal</span>
-              <span style={{ color: 'var(--foreground)' }}>{formatBRL(emprestimo.valor_principal)}</span>
-            </div>
+
+            <BreakdownRow
+              label="Principal"
+              total={emprestimo.valor_principal}
+              pago={r.pagoPrincipal}
+              restante={r.principal}
+            />
+
             {jurosTotal > 0 && (
-              <div className="flex justify-between text-sm">
-                <span style={rowStyle}>
-                  Juros{emprestimo.periodos_atraso > 0 ? ` (${1 + emprestimo.periodos_atraso}× ${emprestimo.taxa_juros}%)` : ` (${emprestimo.taxa_juros}%)`}
-                </span>
-                <span style={{ color: 'var(--foreground)' }}>{formatBRL(jurosTotal)}</span>
-              </div>
+              <BreakdownRow
+                label={emprestimo.periodos_atraso > 0
+                  ? `Juros (${1 + emprestimo.periodos_atraso}× ${emprestimo.taxa_juros}%)`
+                  : `Juros (${emprestimo.taxa_juros}%)`}
+                total={jurosTotal}
+                pago={r.pagoJuros}
+                restante={r.juros}
+              />
             )}
+
             {temAtraso && (
-              <div className="flex justify-between text-sm">
-                <span style={{ color: '#ff5470' }}>
-                  Mora ({emprestimo.dias_atraso} dia{emprestimo.dias_atraso > 1 ? 's' : ''})
-                </span>
-                <span style={{ color: '#ff5470' }}>{formatBRL(emprestimo.valor_mora)}</span>
-              </div>
+              <BreakdownRow
+                label={`Mora (${emprestimo.dias_atraso} dia${emprestimo.dias_atraso > 1 ? 's' : ''})`}
+                total={emprestimo.valor_mora}
+                pago={r.pagoAtraso}
+                restante={r.atraso}
+                danger
+              />
             )}
+
             <div
               className="flex justify-between text-sm font-bold border-t mt-1 pt-1.5"
               style={{ borderColor: 'rgba(0,229,204,0.2)' }}
             >
-              <span style={{ color: 'var(--foreground)' }}>Total devido</span>
-              <span style={{ color: '#00e5cc' }}>{formatBRL(emprestimo.valor_total_devido)}</span>
+              <span style={{ color: 'var(--foreground)' }}>
+                {r.total < emprestimo.valor_total_devido ? 'Restante' : 'Total devido'}
+              </span>
+              <span style={{ color: '#00e5cc' }}>{formatBRL(r.total)}</span>
             </div>
+
           </div>
         </div>
 
@@ -139,14 +189,16 @@ export function PagamentoDialog({ emprestimo, onClose, onSubmit, saving }: Props
               className="w-full rounded-lg px-3 py-2 text-sm border appearance-none"
               style={inputStyle}
             >
-              <option value="quitacao">Quitação total — {formatBRL(emprestimo.valor_total_devido)}</option>
-              <option value="principal">Principal (dívida) — {formatBRL(emprestimo.valor_principal)}</option>
-              {jurosTotal > 0 && (
-                <option value="juros">Juros — {formatBRL(jurosTotal)}</option>
+              <option value="quitacao">Quitação total — {formatBRL(r.total)}</option>
+              {r.principal > 0 && (
+                <option value="principal">Principal (dívida) — {formatBRL(r.principal)}</option>
               )}
-              {temAtraso && (
+              {r.juros > 0 && (
+                <option value="juros">Juros — {formatBRL(r.juros)}</option>
+              )}
+              {temAtraso && r.atraso > 0 && (
                 <option value="atraso">
-                  Mora / Atraso ({emprestimo.dias_atraso} dia{emprestimo.dias_atraso > 1 ? 's' : ''}) — {formatBRL(emprestimo.valor_mora)}
+                  Mora / Atraso ({emprestimo.dias_atraso} dia{emprestimo.dias_atraso > 1 ? 's' : ''}) — {formatBRL(r.atraso)}
                 </option>
               )}
             </select>
@@ -169,7 +221,7 @@ export function PagamentoDialog({ emprestimo, onClose, onSubmit, saving }: Props
               {...form.register('valor', {
                 valueAsNumber: true,
                 validate: v => {
-                  const max = getMax(form.getValues('destino') as Destino, emprestimo)
+                  const max = getRestante(form.getValues('destino') as Destino)
                   return v <= max + 0.005 || `Máximo para este tipo: ${formatBRL(max)}`
                 },
               })}
@@ -222,5 +274,32 @@ export function PagamentoDialog({ emprestimo, onClose, onSubmit, saving }: Props
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+interface BreakdownRowProps {
+  label: string
+  total: number
+  pago: number
+  restante: number
+  danger?: boolean
+}
+
+function BreakdownRow({ label, total, pago, restante, danger }: BreakdownRowProps) {
+  const baseColor = danger ? '#ff5470' : 'var(--foreground)'
+  const temParcial = pago > 0
+
+  return (
+    <div className="flex justify-between text-sm">
+      <span style={{ color: 'var(--muted-foreground)' }}>{label}</span>
+      <div className="flex items-center gap-1.5">
+        {temParcial && (
+          <span className="text-xs line-through" style={{ color: 'var(--muted-foreground)' }}>
+            {formatBRL(total)}
+          </span>
+        )}
+        <span style={{ color: baseColor }}>{formatBRL(restante)}</span>
+      </div>
+    </div>
   )
 }

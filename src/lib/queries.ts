@@ -7,6 +7,7 @@ export const queryKeys = {
   clienteDetail: (clienteId: string) => ['emprestimos_calculados', clienteId] as const,
   clientes: () => ['clientes'] as const,
   configuracoes: () => ['configuracoes'] as const,
+  pagamentos: () => ['pagamentos'] as const,
 }
 
 // ── Client-side fetchers ───────────────────────────────────────
@@ -20,6 +21,18 @@ export async function fetchClientes(): Promise<Cliente[]> {
   const supabase = createClient()
   const { data } = await supabase.from('clientes').select('*').order('nome')
   return (data ?? []) as Cliente[]
+}
+
+export interface PagamentoResumo {
+  id: string
+  emprestimo_id: string
+  valor: number
+}
+
+export async function fetchAllPagamentos(): Promise<PagamentoResumo[]> {
+  const supabase = createClient()
+  const { data } = await supabase.from('pagamentos').select('id, emprestimo_id, valor')
+  return (data ?? []) as PagamentoResumo[]
 }
 
 export async function fetchConfiguracoes(): Promise<Configuracoes | null> {

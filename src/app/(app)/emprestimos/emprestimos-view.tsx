@@ -112,6 +112,7 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
   function invalidateAll() {
     queryClient.invalidateQueries({ queryKey: queryKeys.emprestimosCalculados() })
     queryClient.invalidateQueries({ queryKey: queryKeys.clientes() })
+    queryClient.invalidateQueries({ queryKey: queryKeys.pagamentos() })
     if (selectedClienteId) {
       queryClient.invalidateQueries({ queryKey: queryKeys.clienteDetail(selectedClienteId) })
     }
@@ -181,6 +182,19 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
       invalidateAll()
     },
     onError: (err: Error) => toast.error('Erro ao registrar pagamento: ' + err.message),
+  })
+
+  const deleteEmprestimoMutation = useMutation({
+    mutationFn: async (empId: string) => {
+      const supabase = createClient()
+      const { error } = await supabase.from('emprestimos').delete().eq('id', empId)
+      if (error) throw new Error(error.message)
+    },
+    onSuccess: () => {
+      toast.success('Empréstimo excluído!')
+      invalidateAll()
+    },
+    onError: (err: Error) => toast.error('Erro ao excluir: ' + err.message),
   })
 
   const editEmprestimoMutation = useMutation({
@@ -412,6 +426,7 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
               anotacoes={anotacoesPorEmp[e.id] ?? []}
               onPagamento={() => setPagamentoEmp(e)}
               onEdit={() => setEditandoEmp(e)}
+              onDelete={async () => { deleteEmprestimoMutation.mutate(e.id) }}
               onAddAnotacao={texto => handleAddAnotacao(e.id, texto)}
               onDeleteAnotacao={anotId => handleDeleteAnotacao(anotId, e.id)}
               hoje={HOJE}
@@ -432,6 +447,7 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
 
       <PagamentoDialog
         emprestimo={pagamentoEmp}
+        pagamentos={pagamentoEmp ? (pagamentosPorEmp[pagamentoEmp.id] ?? []) : []}
         onClose={() => setPagamentoEmp(null)}
         onSubmit={async v => { pagamentoMutation.mutate(v) }}
         saving={pagamentoMutation.isPending}

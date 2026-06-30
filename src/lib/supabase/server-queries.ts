@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import type { EmprestimoCalculado, Cliente, Configuracoes } from '@/lib/types'
+import type { PagamentoResumo } from '@/lib/queries'
 
 export async function serverFetchEmprestimosCalculados(): Promise<EmprestimoCalculado[]> {
   const supabase = await createClient()
@@ -18,4 +19,10 @@ export async function serverFetchConfiguracoes(): Promise<Configuracoes | null> 
   const { data, error } = await supabase.from('configuracoes').select('*').single()
   if (error) return null
   return data as Configuracoes
+}
+
+export async function serverFetchAllPagamentos(): Promise<PagamentoResumo[]> {
+  const supabase = await createClient()
+  const { data } = await supabase.from('pagamentos').select('id, emprestimo_id, valor')
+  return (data ?? []) as PagamentoResumo[]
 }

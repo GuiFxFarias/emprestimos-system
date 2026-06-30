@@ -14,9 +14,20 @@ interface Props {
   anotacoes: AnotacaoEmprestimo[]
   onPagamento: () => void
   onEdit: () => void
+  onDelete: () => Promise<void>
   onAddAnotacao: (texto: string) => Promise<void>
   onDeleteAnotacao: (id: string) => Promise<void>
   hoje: string
+}
+
+function labelDestino(destino: string | null, tipo: string): string {
+  switch (destino) {
+    case 'quitacao':  return 'Quitação'
+    case 'principal': return 'Pagamento — Principal'
+    case 'juros':     return 'Pagamento — Juros'
+    case 'atraso':    return 'Pagamento — Mora'
+    default:          return tipo === 'quitacao' ? 'Quitação' : 'Pagamento parcial'
+  }
 }
 
 interface TimelineItem {
@@ -27,15 +38,29 @@ interface TimelineItem {
 }
 
 export const EmprestimoTimeline = memo(function EmprestimoTimeline({
-  e, pagamentos, anotacoes, onPagamento, onEdit, onAddAnotacao, onDeleteAnotacao, hoje,
+  e, pagamentos, anotacoes, onPagamento, onEdit, onDelete, onAddAnotacao, onDeleteAnotacao, hoje,
 }: Props) {
   const [novaAnotacao, setNovaAnotacao] = useState('')
   const [savingAnotacao, setSavingAnotacao] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deletingEmp, setDeletingEmp] = useState(false)
+
+  async function handleDelete() {
+    setDeletingEmp(true)
+    await onDelete()
+    setDeletingEmp(false)
+    setConfirmDelete(false)
+  }
 
   const venceHoje = e.situacao === 'em_dia' && e.data_vencimento === hoje
   const atrasado = e.situacao === 'atrasado'
   const quitado = e.status === 'quitado'
+
+  const pagoAtraso = pagamentos
+    .filter(p => p.destino === 'atraso')
+    .reduce((s, p) => s + p.valor, 0)
+  const atrasoPago = e.valor_mora > 0.005 && pagoAtraso >= e.valor_mora - 0.005
 
   const totalPago = pagamentos
     .filter(p => p.tipo === 'parcial')
@@ -63,7 +88,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     },
     ...pagamentos.map(p => ({
       date: p.data_pagamento,
-      label: p.tipo === 'quitacao' ? `Quitação — ${formatBRL(p.valor)}` : `Pagamento parcial — ${formatBRL(p.valor)}`,
+      label: `${labelDestino(p.destino, p.tipo)} — ${formatBRL(p.valor)}`,
       value: p.valor,
       type: (p.tipo === 'quitacao' ? 'quitado' : 'pagamento') as TimelineItem['type'],
     })),
@@ -170,32 +195,68 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <Badge
-            className="text-xs"
-            style={{ background: `${situacaoColor}20`, color: situacaoColor, border: 'none' }}
-          >
-            {atrasado && <AlertCircle className="w-3 h-3 mr-1" />}
-            {quitado && <CheckCircle2 className="w-3 h-3 mr-1" />}
-            {situacaoLabel}
-          </Badge>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={onEdit}
-            className="h-7 w-7 hover:bg-primary/10"
-            style={{ color: 'var(--muted-foreground)' }}
-          >
-            <Pencil className="w-3.5 h-3.5" />
-          </Button>
-          {!quitado && (
-            <Button
-              size="sm"
-              onClick={onPagamento}
-              className="text-xs font-semibold h-7 px-3 hover:brightness-110 active:scale-95"
-              style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
-            >
-              Pagar
-            </Button>
+          {confirmDelete ? (
+            <>
+              <span className="text-xs font-medium" style={{ color: '#ff5470' }}>Excluir?</span>
+              <Button
+                size="sm"
+                disabled={deletingEmp}
+                onClick={handleDelete}
+                className="h-7 px-2 text-xs font-semibold"
+                style={{ background: '#ff5470', color: '#fff' }}
+              >
+                {deletingEmp ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Sim'}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={deletingEmp}
+                onClick={() => setConfirmDelete(false)}
+                className="h-7 px-2 text-xs"
+                style={{ color: 'var(--muted-foreground)' }}
+              >
+                Não
+              </Button>
+            </>
+          ) : (
+            <>
+              <Badge
+                className="text-xs"
+                style={{ background: `${situacaoColor}20`, color: situacaoColor, border: 'none' }}
+              >
+                {atrasado && <AlertCircle className="w-3 h-3 mr-1" />}
+                {quitado && <CheckCircle2 className="w-3 h-3 mr-1" />}
+                {situacaoLabel}
+              </Badge>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => setConfirmDelete(true)}
+                className="h-7 w-7 hover:bg-destructive/10"
+                style={{ color: 'var(--muted-foreground)' }}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={onEdit}
+                className="h-7 w-7 hover:bg-primary/10"
+                style={{ color: 'var(--muted-foreground)' }}
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </Button>
+              {!quitado && (
+                <Button
+                  size="sm"
+                  onClick={onPagamento}
+                  className="text-xs font-semibold h-7 px-3 hover:brightness-110 active:scale-95"
+                  style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+                >
+                  Pagar
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -250,7 +311,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
       )}
 
       {/* Contador de atraso */}
-      {atrasado && (
+      {atrasado && !atrasoPago && (
         <div
           className="mb-4 rounded-xl px-4 py-3 flex items-center gap-3"
           style={{
