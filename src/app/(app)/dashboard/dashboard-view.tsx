@@ -58,24 +58,17 @@ export function DashboardView({
   }), [emprestimos])
 
   const metrics = useMemo(() => {
-    // IDs dos empréstimos quitados para filtrar pagamentos
-    const quitadosIds = new Set(quitados.map(e => e.id))
-
-    // Total recebido = soma de TODOS os pagamentos já realizados
     const totalRecebido = pagamentos.reduce((s, p) => s + p.valor, 0)
 
-    // Lucro = tudo que recebeu de empréstimos quitados − o capital desses empréstimos
-    const recebidoDeQuitados = pagamentos
-      .filter(p => quitadosIds.has(p.emprestimo_id))
-      .reduce((s, p) => s + p.valor, 0)
-    const capitalQuitados = quitados.reduce((s, e) => s + e.valor_principal, 0)
-    const lucro = recebidoDeQuitados - capitalQuitados
-
-    // Juros a receber = tudo acima do principal (juros de todos os períodos + mora)
     const jurosAReceber = ativos.reduce(
       (s, e) => s + e.valor_total_devido - e.valor_principal - e.valor_mora,
       0
     )
+
+    const anoMes = new Date().toISOString().slice(0, 7)
+    const rendaMensalJuros = ativos
+      .filter(e => e.data_vencimento.startsWith(anoMes))
+      .reduce((s, e) => s + e.valor_juros, 0)
 
     return [
       {
@@ -86,7 +79,7 @@ export function DashboardView({
       },
       {
         label: 'Carteira a receber',
-        value: formatBRL(ativos.reduce((s, e) => s + e.valor_total_devido, 0)),
+        value: formatBRL(ativos.reduce((s, e) => s + e.valor_no_vencimento, 0)),
         icon: <TrendingUp className="w-5 h-5" />,
         color: '#00e5cc',
       },
@@ -110,13 +103,13 @@ export function DashboardView({
         color: '#00e5cc',
       },
       {
-        label: 'Lucro realizado',
-        value: formatBRL(lucro),
+        label: 'Renda mensal juros',
+        value: formatBRL(rendaMensalJuros),
         icon: <ArrowUp className="w-5 h-5" />,
         color: '#00e5cc',
       },
     ]
-  }, [ativos, quitados, atrasados, pagamentos])
+  }, [ativos, atrasados, pagamentos])
 
   const donutData = useMemo(() => [
     { name: 'Em dia', value: ativos.filter(e => e.situacao === 'em_dia').length, color: 'var(--primary)' },

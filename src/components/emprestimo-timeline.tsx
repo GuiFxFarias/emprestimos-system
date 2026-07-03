@@ -62,6 +62,10 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     .reduce((s, p) => s + p.valor, 0)
   const atrasoPago = e.valor_mora > 0.005 && pagoAtraso >= e.valor_mora - 0.005
 
+  const jurosTotal = Number((e.valor_juros * (1 + e.periodos_atraso)).toFixed(2))
+  const pagoJuros = pagamentos.filter(p => p.destino === 'juros').reduce((s, p) => s + p.valor, 0)
+  const jurosPago = jurosTotal > 0.005 && pagoJuros >= jurosTotal - 0.005
+
   const totalPago = pagamentos
     .filter(p => p.tipo === 'parcial')
     .reduce((sum, p) => sum + p.valor, 0)
@@ -70,8 +74,8 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     ? Math.round(e.valor_juros * e.periodos_atraso * 100) / 100
     : 0
 
-  const borderClass = atrasado ? 'pulse-danger' : ''
-  const borderColor = atrasado
+  const borderClass = atrasado && !jurosPago ? 'pulse-danger' : ''
+  const borderColor = atrasado && !jurosPago
     ? 'rgba(255,84,112,0.5)'
     : venceHoje
     ? 'var(--destructive)'
@@ -136,7 +140,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     return <Clock className="w-3 h-3" />
   }
 
-  const situacaoColor = atrasado
+  const situacaoColor = atrasado && !jurosPago
     ? 'var(--destructive)'
     : venceHoje
     ? 'var(--destructive)'
@@ -145,7 +149,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     : 'var(--primary)'
 
   const situacaoLabel = atrasado
-    ? `Atrasado ${e.dias_atraso}d`
+    ? (atrasoPago ? 'Atrasado' : `Atrasado ${e.dias_atraso}d`)
     : venceHoje
     ? 'Vence hoje'
     : quitado
