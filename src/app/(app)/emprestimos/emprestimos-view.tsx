@@ -70,19 +70,24 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
 
   // ── Derived data ──────────────────────────────────────────────
   const clienteStats = useMemo((): ClienteEmprestimoStats[] => {
-    const statsMap: Record<string, { totalAtivo: number; totalDevido: number; totalJuros: number; temAtrasado: boolean; temVenceHoje: boolean; ativos: number }> = {}
+    const statsMap: Record<string, { totalAtivo: number; totalDevido: number; totalJuros: number; totalNegociado: number; temAtrasado: boolean; temNegociado: boolean; temVenceHoje: boolean; ativos: number }> = {}
 
     for (const e of allEmprestimos) {
       if (!statsMap[e.cliente_id]) {
-        statsMap[e.cliente_id] = { totalAtivo: 0, totalDevido: 0, totalJuros: 0, temAtrasado: false, temVenceHoje: false, ativos: 0 }
+        statsMap[e.cliente_id] = { totalAtivo: 0, totalDevido: 0, totalJuros: 0, totalNegociado: 0, temAtrasado: false, temNegociado: false, temVenceHoje: false, ativos: 0 }
+      }
+      if (e.status === 'ativo' || e.status === 'negociado') {
+        statsMap[e.cliente_id].ativos++
       }
       if (e.status === 'ativo') {
-        statsMap[e.cliente_id].ativos++
         statsMap[e.cliente_id].totalAtivo += e.valor_principal
         statsMap[e.cliente_id].totalDevido += e.valor_total_devido
         statsMap[e.cliente_id].totalJuros += e.valor_juros * (1 + e.periodos_atraso)
         if (e.situacao === 'atrasado') statsMap[e.cliente_id].temAtrasado = true
         if (e.situacao === 'em_dia' && e.data_vencimento === HOJE) statsMap[e.cliente_id].temVenceHoje = true
+      } else if (e.status === 'negociado') {
+        statsMap[e.cliente_id].temNegociado = true
+        statsMap[e.cliente_id].totalNegociado += e.valor_total_devido
       }
     }
 
@@ -94,7 +99,9 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
       totalAtivo: statsMap[c.id]?.totalAtivo ?? 0,
       totalDevido: statsMap[c.id]?.totalDevido ?? 0,
       totalJuros: statsMap[c.id]?.totalJuros ?? 0,
+      totalNegociado: statsMap[c.id]?.totalNegociado ?? 0,
       temAtrasado: statsMap[c.id]?.temAtrasado ?? false,
+      temNegociado: statsMap[c.id]?.temNegociado ?? false,
       temVenceHoje: statsMap[c.id]?.temVenceHoje ?? false,
       emprestimosAtivos: statsMap[c.id]?.ativos ?? 0,
     }))
@@ -213,6 +220,7 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
         status: values.status,
         data_quitacao: values.status === 'quitado' ? (values.data_quitacao || null) : null,
         valor_quitado: values.status === 'quitado' ? (values.valor_quitado ?? null) : null,
+        data_negociacao: values.status === 'negociado' && values.congelar_negociacao ? (values.data_negociacao || null) : null,
       }).eq('id', editandoEmp.id)
       if (error) throw new Error(error.message)
     },

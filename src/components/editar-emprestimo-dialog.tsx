@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { format } from 'date-fns'
@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dialog'
 import { Loader2 } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { calcularPreview } from '@/lib/calculo'
 import { formatBRL } from '@/lib/format'
 import type { EmprestimoCalculado } from '@/lib/types'
@@ -30,9 +31,11 @@ const schema = z.object({
   juros_mora_diario_reais: z.number().min(0),
   data_emprestimo: z.string().min(1, 'Data obrigatória'),
   observacoes: z.string().optional(),
-  status: z.enum(['ativo', 'quitado']),
+  status: z.enum(['ativo', 'negociado', 'quitado']),
   data_quitacao: z.string().optional(),
   valor_quitado: z.number().min(0).optional(),
+  congelar_negociacao: z.boolean().optional(),
+  data_negociacao: z.string().optional(),
 })
 
 export type EditEmprestimoFormValues = z.infer<typeof schema>
@@ -57,6 +60,8 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
       status: 'ativo',
       data_quitacao: '',
       valor_quitado: undefined,
+      congelar_negociacao: false,
+      data_negociacao: '',
     },
   })
 
@@ -72,6 +77,8 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
         status: emprestimo.status,
         data_quitacao: emprestimo.data_quitacao ?? '',
         valor_quitado: emprestimo.valor_quitado ?? undefined,
+        congelar_negociacao: !!emprestimo.data_negociacao,
+        data_negociacao: emprestimo.data_negociacao ?? '',
       })
     }
   }, [emprestimo, form])
@@ -162,9 +169,13 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
           <div className="flex flex-col gap-1.5">
             <Label style={{ color: 'var(--muted-foreground)' }}>Status</Label>
             <Select
-              items={[{ value: 'ativo', label: 'Ativo' }, { value: 'quitado', label: 'Quitado' }]}
+              items={[
+                { value: 'ativo', label: 'Ativo' },
+                { value: 'negociado', label: 'Negociado' },
+                { value: 'quitado', label: 'Quitado' },
+              ]}
               value={status}
-              onValueChange={v => form.setValue('status', v as 'ativo' | 'quitado', { shouldValidate: true })}
+              onValueChange={v => form.setValue('status', v as 'ativo' | 'negociado' | 'quitado', { shouldValidate: true })}
             >
               <SelectTrigger
                 className="w-full"
@@ -174,10 +185,56 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="ativo">Ativo</SelectItem>
+                <SelectItem value="negociado">Negociado</SelectItem>
                 <SelectItem value="quitado">Quitado</SelectItem>
               </SelectContent>
             </Select>
           </div>
+
+          {/* Negociação fields — só aparecem quando status = negociado */}
+          {status === 'negociado' && (
+            <div
+              className="rounded-xl p-3 border flex flex-col gap-3"
+              style={{ background: 'var(--muted)', borderColor: 'var(--border)' }}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <Label style={{ color: 'var(--foreground)' }}>Congelar cálculo nesta data</Label>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                    Trava juros/mora/dias de atraso na data do acordo. Se desligado, os cálculos continuam normalmente.
+                  </p>
+                </div>
+                <Controller
+                  control={form.control}
+                  name="congelar_negociacao"
+                  render={({ field }) => (
+                    <Switch
+                      checked={field.value ?? false}
+                      onCheckedChange={checked => {
+                        field.onChange(checked)
+                        if (checked && !form.getValues('data_negociacao')) {
+                          form.setValue('data_negociacao', new Date().toISOString().slice(0, 10))
+                        }
+                      }}
+                    />
+                  )}
+                />
+              </div>
+              {watched.congelar_negociacao && (
+                <div className="flex flex-col gap-1.5">
+                  <Label style={{ color: 'var(--muted-foreground)' }}>Data da negociação</Label>
+                  <Input
+                    type="date"
+                    {...form.register('data_negociacao')}
+                    style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
+                  />
+                </div>
+              )}
+              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                Use as anotações do empréstimo para registrar o que foi acordado.
+              </p>
+            </div>
+          )}
 
           {/* Quitação fields — só aparecem quando status = quitado */}
           {status === 'quitado' && (

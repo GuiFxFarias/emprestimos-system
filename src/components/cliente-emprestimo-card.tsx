@@ -14,7 +14,9 @@ export interface ClienteEmprestimoStats {
   totalAtivo: number
   totalDevido: number
   totalJuros: number
+  totalNegociado: number
   temAtrasado: boolean
+  temNegociado: boolean
   temVenceHoje: boolean
   emprestimosAtivos: number
 }
@@ -46,6 +48,12 @@ export const ClienteEmprestimoCard = memo(function ClienteEmprestimoCard({ clien
     </Badge>
   ) : null
 
+  const negociadoBadge = cliente.temNegociado ? (
+    <Badge className="text-xs" style={{ background: 'rgba(139,92,246,0.15)', color: '#8b5cf6', border: 'none' }}>
+      Negociado
+    </Badge>
+  ) : null
+
   return (
     <button
       onClick={onClick}
@@ -64,6 +72,7 @@ export const ClienteEmprestimoCard = memo(function ClienteEmprestimoCard({ clien
             {cliente.nome}
           </span>
           {statusBadge}
+          {negociadoBadge}
         </div>
         {cliente.emprestimosAtivos > 0 ? (
           <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
@@ -75,6 +84,14 @@ export const ClienteEmprestimoCard = memo(function ClienteEmprestimoCard({ clien
             <span className="font-medium" style={{ color: cliente.temAtrasado ? 'var(--destructive)' : '#00e5cc' }}>
               {formatBRL(cliente.totalJuros)}
             </span>
+            {cliente.totalNegociado > 0 && (
+              <>
+                {' · '}Negociado:{' '}
+                <span className="font-medium" style={{ color: '#8b5cf6' }}>
+                  {formatBRL(cliente.totalNegociado)}
+                </span>
+              </>
+            )}
           </p>
         ) : (
           <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>Sem empréstimos ativos</p>

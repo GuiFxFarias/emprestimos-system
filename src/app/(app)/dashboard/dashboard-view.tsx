@@ -51,10 +51,11 @@ export function DashboardView({
     initialData: initialPagamentos,
   })
 
-  const { ativos, quitados, atrasados } = useMemo(() => ({
-    ativos: emprestimos.filter(e => e.status === 'ativo'),
+  const { ativos, quitados, atrasados, negociados } = useMemo(() => ({
+    ativos: emprestimos.filter(e => e.status === 'ativo' || e.status === 'negociado'),
     quitados: emprestimos.filter(e => e.status === 'quitado'),
     atrasados: emprestimos.filter(e => e.situacao === 'atrasado'),
+    negociados: emprestimos.filter(e => e.situacao === 'negociado'),
   }), [emprestimos])
 
   const metrics = useMemo(() => {
@@ -114,8 +115,9 @@ export function DashboardView({
   const donutData = useMemo(() => [
     { name: 'Em dia', value: ativos.filter(e => e.situacao === 'em_dia').length, color: 'var(--primary)' },
     { name: 'Atrasado', value: atrasados.length, color: 'var(--destructive)' },
+    { name: 'Negociado', value: negociados.length, color: '#8b5cf6' },
     { name: 'Quitado', value: quitados.length, color: '#00e5cc' },
-  ].filter(d => d.value > 0), [ativos, atrasados, quitados])
+  ].filter(d => d.value > 0), [ativos, atrasados, negociados, quitados])
 
   const barData = useMemo(() => {
     const grouped: Record<string, number> = {}

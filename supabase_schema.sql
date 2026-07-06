@@ -10,7 +10,7 @@ create extension if not exists "uuid-ossp";
 do $$
 begin
   if not exists (select 1 from pg_type where typname = 'emprestimo_status') then
-    create type emprestimo_status as enum ('ativo', 'quitado');
+    create type emprestimo_status as enum ('ativo', 'negociado', 'quitado');
   end if;
   if not exists (select 1 from pg_type where typname = 'pagamento_tipo') then
     create type pagamento_tipo as enum ('parcial', 'quitacao');
@@ -60,6 +60,7 @@ create table if not exists public.emprestimos (
   status                        emprestimo_status not null default 'ativo',
   data_quitacao                 date,
   valor_quitado                 numeric(14,2),
+  data_negociacao               date,
   observacoes                   text,
   created_at                    timestamptz not null default now(),
   updated_at                    timestamptz not null default now()
@@ -87,6 +88,9 @@ create index if not exists idx_pagamentos_owner    on public.pagamentos(owner_id
 create index if not exists idx_pagamentos_emp      on public.pagamentos(emprestimo_id);
 
 -- 5) VIEW DE CÁLCULO -----------------------------------------
+-- 'negociado' com data_negociacao preenchida congela juros/mora/atraso
+-- naquela data (data_ref deixa de ser current_date). Sem data_negociacao,
+-- os cálculos seguem normalmente — só muda o rótulo/situação.
 create or replace view public.emprestimos_calculados
 with (security_invoker = on) as
 select
@@ -104,6 +108,7 @@ select
   e.status,
   e.data_quitacao,
   e.valor_quitado,
+  e.data_negociacao,
   e.observacoes,
   e.created_at,
 
@@ -115,14 +120,14 @@ select
 
   case
     when e.status = 'quitado' then 0
-    when current_date > e.data_vencimento then (current_date - e.data_vencimento)
+    when ref.data_ref > e.data_vencimento then (ref.data_ref - e.data_vencimento)
     else 0
   end                                                                        as dias_atraso,
 
   -- Períodos de atraso (ceil: sobe no dia 1 de atraso, não depois de prazo_dias)
   case
-    when e.status = 'quitado' or current_date <= e.data_vencimento then 0
-    else ceil((current_date - e.data_vencimento)::numeric / e.prazo_dias)::int
+    when e.status = 'quitado' or ref.data_ref <= e.data_vencimento then 0
+    else ceil((ref.data_ref - e.data_vencimento)::numeric / e.prazo_dias)::int
   end                                                                        as periodos_atraso,
 
   -- Multa removida — mantida zerada para compatibilidade
@@ -130,34 +135,41 @@ select
 
   -- Mora diária: aplica-se apenas nos dias do período atual (incompleto)
   case
-    when e.status <> 'quitado' and current_date > e.data_vencimento
-      then round(e.juros_mora_diario_reais * ((current_date - e.data_vencimento) % e.prazo_dias), 2)
+    when e.status <> 'quitado' and ref.data_ref > e.data_vencimento
+      then round(e.juros_mora_diario_reais * ((ref.data_ref - e.data_vencimento) % e.prazo_dias), 2)
     else 0
   end                                                                        as valor_mora,
 
   case
-    when e.status = 'quitado' then 'quitado'
+    when e.status = 'quitado'   then 'quitado'
+    when e.status = 'negociado' then 'negociado'
     when current_date > e.data_vencimento then 'atrasado'
     else 'em_dia'
   end                                                                        as situacao,
 
-  -- Valor total devido hoje: juros simples recorrentes a cada período vencido
-  -- + mora diária do período atual (incompleto)
+  -- Valor total devido: juros simples recorrentes a cada período vencido
+  -- + mora diária do período atual (incompleto), calculado sobre data_ref
   case
     when e.status = 'quitado' then 0
-    when current_date <= e.data_vencimento then
+    when ref.data_ref <= e.data_vencimento then
       round(e.valor_principal * (1 + e.taxa_juros / 100.0), 2)
     else
       round(
         e.valor_principal * (1 + e.taxa_juros / 100.0)
         + e.valor_principal * (e.taxa_juros / 100.0)
-          * ceil((current_date - e.data_vencimento)::numeric / e.prazo_dias)
+          * ceil((ref.data_ref - e.data_vencimento)::numeric / e.prazo_dias)
         + e.juros_mora_diario_reais
-          * ((current_date - e.data_vencimento) % e.prazo_dias)
+          * ((ref.data_ref - e.data_vencimento) % e.prazo_dias)
       , 2)
   end                                                                        as valor_total_devido
 from public.emprestimos e
-join public.clientes c on c.id = e.cliente_id;
+join public.clientes c on c.id = e.cliente_id
+cross join lateral (
+  select case
+    when e.status = 'negociado' and e.data_negociacao is not null then e.data_negociacao
+    else current_date
+  end as data_ref
+) ref;
 
 -- 6) ROW LEVEL SECURITY (RLS) --------------------------------
 alter table public.clientes      enable row level security;

@@ -1,7 +1,7 @@
-export type EmprestimoStatus = 'ativo' | 'quitado'
+export type EmprestimoStatus = 'ativo' | 'negociado' | 'quitado'
 export type PagamentoTipo = 'parcial' | 'quitacao'
 export type PagamentoDestino = 'atraso' | 'juros' | 'principal' | 'quitacao'
-export type Situacao = 'em_dia' | 'atrasado' | 'quitado'
+export type Situacao = 'em_dia' | 'atrasado' | 'negociado' | 'quitado'
 
 export interface Cliente {
   id: string
@@ -39,6 +39,7 @@ export interface Emprestimo {
   status: EmprestimoStatus
   data_quitacao: string | null
   valor_quitado: number | null
+  data_negociacao: string | null
   observacoes: string | null
   created_at: string
   updated_at: string
@@ -59,6 +60,7 @@ export interface EmprestimoCalculado {
   status: EmprestimoStatus
   data_quitacao: string | null
   valor_quitado: number | null
+  data_negociacao: string | null
   observacoes: string | null
   created_at: string
   valor_juros: number

@@ -56,6 +56,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
   const venceHoje = e.situacao === 'em_dia' && e.data_vencimento === hoje
   const atrasado = e.situacao === 'atrasado'
   const quitado = e.status === 'quitado'
+  const negociado = e.status === 'negociado'
 
   const pagoAtraso = pagamentos
     .filter(p => p.destino === 'atraso')
@@ -81,6 +82,8 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     ? 'var(--destructive)'
     : quitado
     ? 'rgba(0,229,204,0.3)'
+    : negociado
+    ? 'rgba(139,92,246,0.3)'
     : 'var(--border)'
 
   const timelineItems: TimelineItem[] = [
@@ -146,6 +149,8 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     ? 'var(--destructive)'
     : quitado
     ? '#00e5cc'
+    : negociado
+    ? '#8b5cf6'
     : 'var(--primary)'
 
   const situacaoLabel = atrasado
@@ -154,6 +159,8 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     ? 'Vence hoje'
     : quitado
     ? 'Quitado'
+    : negociado
+    ? 'Negociado'
     : 'Em dia'
 
   async function handleAddAnotacao() {
@@ -195,6 +202,13 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
               <span className="text-xs font-normal ml-1.5" style={{ color: 'var(--muted-foreground)' }}>
                 {totalPago > 0 ? 'saldo devedor' : 'devido hoje'}
               </span>
+            </p>
+          )}
+          {negociado && (
+            <p className="text-xs mt-0.5" style={{ color: '#8b5cf6' }}>
+              {e.data_negociacao
+                ? `Congelado em ${formatDate(e.data_negociacao)}`
+                : 'Cálculo não congelado — juros e mora continuam correndo'}
             </p>
           )}
         </div>
@@ -332,6 +346,21 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
           <span className="text-xs font-medium leading-tight" style={{ color: 'var(--destructive)' }}>
             dias<br />de atraso
           </span>
+        </div>
+      )}
+
+      {/* Observações */}
+      {e.observacoes && (
+        <div
+          className="mb-4 rounded-xl px-3 py-2.5"
+          style={{ background: 'var(--muted)' }}
+        >
+          <p className="text-[11px] font-semibold mb-1" style={{ color: 'var(--muted-foreground)' }}>
+            Observações
+          </p>
+          <p className="text-xs" style={{ color: 'var(--foreground)', whiteSpace: 'pre-wrap' }}>
+            {e.observacoes}
+          </p>
         </div>
       )}
 
