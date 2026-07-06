@@ -40,8 +40,7 @@ create table if not exists public.configuracoes (
                                   references auth.users(id) on delete cascade,
   taxa_juros_padrao             numeric(6,3) not null default 0,
   prazo_padrao_dias             integer      not null default 30,
-  multa_atraso_percentual       numeric(6,3) not null default 0,
-  juros_mora_diario_percentual  numeric(6,3) not null default 0,
+  juros_mora_diario_reais       numeric(10,2) not null default 0,
   created_at                    timestamptz not null default now(),
   updated_at                    timestamptz not null default now()
 );
@@ -57,8 +56,7 @@ create table if not exists public.emprestimos (
   prazo_dias                    integer       not null default 30 check (prazo_dias > 0),
   data_emprestimo               date          not null default current_date,
   data_vencimento               date          generated always as (data_emprestimo + prazo_dias) stored,
-  multa_atraso_percentual       numeric(6,3)  not null default 0,
-  juros_mora_diario_percentual  numeric(6,3)  not null default 0,
+  juros_mora_diario_reais       numeric(10,2) not null default 0,
   status                        emprestimo_status not null default 'ativo',
   data_quitacao                 date,
   valor_quitado                 numeric(14,2),
@@ -75,6 +73,7 @@ create table if not exists public.pagamentos (
   valor          numeric(14,2) not null check (valor > 0),
   data_pagamento date not null default current_date,
   tipo           pagamento_tipo not null default 'quitacao',
+  destino        text check (destino in ('atraso', 'juros', 'principal', 'quitacao')),
   observacoes    text,
   created_at     timestamptz not null default now()
 );
@@ -101,15 +100,17 @@ select
   e.prazo_dias,
   e.data_emprestimo,
   e.data_vencimento,
-  e.multa_atraso_percentual,
-  e.juros_mora_diario_percentual,
+  e.juros_mora_diario_reais,
   e.status,
   e.data_quitacao,
   e.valor_quitado,
   e.observacoes,
   e.created_at,
 
+  -- Juros do período original (fixo, para referência)
   round(e.valor_principal * (e.taxa_juros / 100.0), 2)                       as valor_juros,
+
+  -- Valor no vencimento original (sem atraso)
   round(e.valor_principal * (1 + e.taxa_juros / 100.0), 2)                   as valor_no_vencimento,
 
   case
@@ -118,18 +119,19 @@ select
     else 0
   end                                                                        as dias_atraso,
 
+  -- Períodos de atraso (ceil: sobe no dia 1 de atraso, não depois de prazo_dias)
   case
-    when e.status <> 'quitado' and current_date > e.data_vencimento
-      then round(e.valor_principal * (1 + e.taxa_juros/100.0)
-                 * (e.multa_atraso_percentual/100.0), 2)
-    else 0
-  end                                                                        as valor_multa,
+    when e.status = 'quitado' or current_date <= e.data_vencimento then 0
+    else ceil((current_date - e.data_vencimento)::numeric / e.prazo_dias)::int
+  end                                                                        as periodos_atraso,
 
+  -- Multa removida — mantida zerada para compatibilidade
+  0::numeric(10,2)                                                           as valor_multa,
+
+  -- Mora diária: aplica-se apenas nos dias do período atual (incompleto)
   case
     when e.status <> 'quitado' and current_date > e.data_vencimento
-      then round(e.valor_principal * (1 + e.taxa_juros/100.0)
-                 * (e.juros_mora_diario_percentual/100.0)
-                 * (current_date - e.data_vencimento), 2)
+      then round(e.juros_mora_diario_reais * ((current_date - e.data_vencimento) % e.prazo_dias), 2)
     else 0
   end                                                                        as valor_mora,
 
@@ -139,16 +141,20 @@ select
     else 'em_dia'
   end                                                                        as situacao,
 
+  -- Valor total devido hoje: juros simples recorrentes a cada período vencido
+  -- + mora diária do período atual (incompleto)
   case
     when e.status = 'quitado' then 0
-    else round(
-      e.valor_principal * (1 + e.taxa_juros/100.0)
-      + case when current_date > e.data_vencimento then
-              e.valor_principal * (1 + e.taxa_juros/100.0) * (e.multa_atraso_percentual/100.0)
-            + e.valor_principal * (1 + e.taxa_juros/100.0) * (e.juros_mora_diario_percentual/100.0)
-              * (current_date - e.data_vencimento)
-        else 0 end
-    , 2)
+    when current_date <= e.data_vencimento then
+      round(e.valor_principal * (1 + e.taxa_juros / 100.0), 2)
+    else
+      round(
+        e.valor_principal * (1 + e.taxa_juros / 100.0)
+        + e.valor_principal * (e.taxa_juros / 100.0)
+          * ceil((current_date - e.data_vencimento)::numeric / e.prazo_dias)
+        + e.juros_mora_diario_reais
+          * ((current_date - e.data_vencimento) % e.prazo_dias)
+      , 2)
   end                                                                        as valor_total_devido
 from public.emprestimos e
 join public.clientes c on c.id = e.cliente_id;

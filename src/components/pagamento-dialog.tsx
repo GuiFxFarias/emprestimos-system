@@ -16,6 +16,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Loader2 } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatBRL } from '@/lib/format'
 import type { EmprestimoCalculado, Pagamento } from '@/lib/types'
 
@@ -183,25 +184,34 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
         <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <Label style={rowStyle}>Destinação do pagamento</Label>
-            <select
+            <Select
+              items={[
+                { value: 'quitacao', label: `Quitação total — ${formatBRL(r.total)}` },
+                ...(r.principal > 0 ? [{ value: 'principal', label: `Principal (dívida) — ${formatBRL(r.principal)}` }] : []),
+                ...(r.juros > 0 ? [{ value: 'juros', label: `Juros — ${formatBRL(r.juros)}` }] : []),
+                ...(temAtraso && r.atraso > 0 ? [{ value: 'atraso', label: `Mora / Atraso (${emprestimo.dias_atraso} dia${emprestimo.dias_atraso > 1 ? 's' : ''}) — ${formatBRL(r.atraso)}` }] : []),
+              ]}
               value={destino}
-              onChange={e => handleDestinoChange(e.target.value as Destino)}
-              className="w-full rounded-lg px-3 py-2 text-sm border appearance-none"
-              style={inputStyle}
+              onValueChange={v => handleDestinoChange(v as Destino)}
             >
-              <option value="quitacao">Quitação total — {formatBRL(r.total)}</option>
-              {r.principal > 0 && (
-                <option value="principal">Principal (dívida) — {formatBRL(r.principal)}</option>
-              )}
-              {r.juros > 0 && (
-                <option value="juros">Juros — {formatBRL(r.juros)}</option>
-              )}
-              {temAtraso && r.atraso > 0 && (
-                <option value="atraso">
-                  Mora / Atraso ({emprestimo.dias_atraso} dia{emprestimo.dias_atraso > 1 ? 's' : ''}) — {formatBRL(r.atraso)}
-                </option>
-              )}
-            </select>
+              <SelectTrigger className="w-full" style={inputStyle}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="quitacao">Quitação total — {formatBRL(r.total)}</SelectItem>
+                {r.principal > 0 && (
+                  <SelectItem value="principal">Principal (dívida) — {formatBRL(r.principal)}</SelectItem>
+                )}
+                {r.juros > 0 && (
+                  <SelectItem value="juros">Juros — {formatBRL(r.juros)}</SelectItem>
+                )}
+                {temAtraso && r.atraso > 0 && (
+                  <SelectItem value="atraso">
+                    Mora / Atraso ({emprestimo.dias_atraso} dia{emprestimo.dias_atraso > 1 ? 's' : ''}) — {formatBRL(r.atraso)}
+                  </SelectItem>
+                )}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="flex flex-col gap-1.5">

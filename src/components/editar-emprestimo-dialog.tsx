@@ -18,6 +18,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Loader2 } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { calcularPreview } from '@/lib/calculo'
 import { formatBRL } from '@/lib/format'
 import type { EmprestimoCalculado } from '@/lib/types'
@@ -160,14 +161,22 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
           {/* Status */}
           <div className="flex flex-col gap-1.5">
             <Label style={{ color: 'var(--muted-foreground)' }}>Status</Label>
-            <select
-              {...form.register('status')}
-              className="w-full rounded-lg px-3 py-2 text-sm border appearance-none"
-              style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
+            <Select
+              items={[{ value: 'ativo', label: 'Ativo' }, { value: 'quitado', label: 'Quitado' }]}
+              value={status}
+              onValueChange={v => form.setValue('status', v as 'ativo' | 'quitado', { shouldValidate: true })}
             >
-              <option value="ativo">Ativo</option>
-              <option value="quitado">Quitado</option>
-            </select>
+              <SelectTrigger
+                className="w-full"
+                style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ativo">Ativo</SelectItem>
+                <SelectItem value="quitado">Quitado</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Quitação fields — só aparecem quando status = quitado */}

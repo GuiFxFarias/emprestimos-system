@@ -1,6 +1,6 @@
 'use client'
 
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { format } from 'date-fns'
@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import { Loader2 } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { calcularPreview } from '@/lib/calculo'
 import { formatBRL } from '@/lib/format'
 import type { Cliente, Configuracoes } from '@/lib/types'
@@ -105,17 +106,29 @@ export function NovoEmprestimoDialog({ open, onOpenChange, clientes, config, onS
                 {clientes.find(c => c.id === defaultClienteId)?.nome ?? 'Cliente selecionado'}
               </div>
             ) : (
-              <select
-                defaultValue=""
-                onChange={(e) => form.setValue('cliente_id', e.target.value)}
-                className="w-full rounded-lg px-3 py-2 text-sm border appearance-none"
-                style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
-              >
-                <option value="" disabled style={{ color: 'var(--muted-foreground)' }}>Selecione um cliente</option>
-                {clientes.map(c => (
-                  <option key={c.id} value={c.id}>{c.nome}</option>
-                ))}
-              </select>
+              <Controller
+                control={form.control}
+                name="cliente_id"
+                render={({ field }) => (
+                  <Select
+                    items={clientes.map(c => ({ value: c.id, label: c.nome }))}
+                    value={field.value || null}
+                    onValueChange={v => field.onChange(v ?? '')}
+                  >
+                    <SelectTrigger
+                      className="w-full"
+                      style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
+                    >
+                      <SelectValue placeholder="Selecione um cliente" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clientes.map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
             )}
             {form.formState.errors.cliente_id && (
               <p className="text-xs" style={{ color: 'var(--destructive)' }}>{form.formState.errors.cliente_id.message}</p>
