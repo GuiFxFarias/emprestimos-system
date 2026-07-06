@@ -41,6 +41,7 @@ export interface Emprestimo {
   valor_quitado: number | null
   data_negociacao: string | null
   valor_negociado: number | null
+  retroativo: boolean
   observacoes: string | null
   created_at: string
   updated_at: string
@@ -63,6 +64,7 @@ export interface EmprestimoCalculado {
   valor_quitado: number | null
   data_negociacao: string | null
   valor_negociado: number | null
+  retroativo: boolean
   observacoes: string | null
   created_at: string
   valor_juros: number

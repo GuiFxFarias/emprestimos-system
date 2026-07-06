@@ -141,6 +141,9 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
         juros_mora_diario_reais: values.juros_mora_diario_reais,
         data_emprestimo: values.data_emprestimo,
         observacoes: values.observacoes || null,
+        status: values.ja_quitado ? 'quitado' : 'ativo',
+        data_quitacao: values.ja_quitado ? values.data_emprestimo : null,
+        valor_quitado: values.ja_quitado ? values.valor_principal : null,
       })
       if (error) throw new Error(error.message)
     },
@@ -217,11 +220,15 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
         juros_mora_diario_reais: values.juros_mora_diario_reais,
         data_emprestimo: values.data_emprestimo,
         observacoes: values.observacoes || null,
-        status: values.status,
-        data_quitacao: values.status === 'quitado' ? (values.data_quitacao || null) : null,
-        valor_quitado: values.status === 'quitado' ? (values.valor_quitado ?? null) : null,
-        data_negociacao: values.status === 'negociado' && values.congelar_negociacao ? (values.data_negociacao || null) : null,
-        valor_negociado: values.status === 'negociado' ? (values.valor_negociado ?? null) : null,
+        status: values.ja_quitado ? 'quitado' : values.status,
+        data_quitacao: values.ja_quitado
+          ? values.data_emprestimo
+          : values.status === 'quitado' ? (values.data_quitacao || null) : null,
+        valor_quitado: values.ja_quitado
+          ? values.valor_principal
+          : values.status === 'quitado' ? (values.valor_quitado ?? null) : null,
+        data_negociacao: !values.ja_quitado && values.status === 'negociado' && values.congelar_negociacao ? (values.data_negociacao || null) : null,
+        valor_negociado: !values.ja_quitado && values.status === 'negociado' ? (values.valor_negociado ?? null) : null,
       }).eq('id', editandoEmp.id)
       if (error) throw new Error(error.message)
     },

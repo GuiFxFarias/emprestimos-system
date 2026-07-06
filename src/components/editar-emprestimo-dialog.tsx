@@ -37,6 +37,7 @@ const schema = z.object({
   congelar_negociacao: z.boolean().optional(),
   data_negociacao: z.string().optional(),
   valor_negociado: z.number().min(0).optional(),
+  ja_quitado: z.boolean().optional(),
 })
 
 export type EditEmprestimoFormValues = z.infer<typeof schema>
@@ -64,6 +65,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
       congelar_negociacao: false,
       data_negociacao: '',
       valor_negociado: undefined,
+      ja_quitado: false,
     },
   })
 
@@ -82,6 +84,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
         congelar_negociacao: !!emprestimo.data_negociacao,
         data_negociacao: emprestimo.data_negociacao ?? '',
         valor_negociado: emprestimo.valor_negociado ?? undefined,
+        ja_quitado: false,
       })
     }
   }, [emprestimo, form])
@@ -138,6 +141,32 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
             </div>
           </div>
 
+          {/* Já quitado (histórico) */}
+          <div
+            className="rounded-xl p-3 border flex items-center justify-between gap-3"
+            style={{ background: 'var(--muted)', borderColor: 'var(--border)' }}
+          >
+            <div>
+              <Label style={{ color: 'var(--foreground)' }}>Já quitado (histórico)</Label>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                Marca como já pago desde sempre — valor quitado = principal, data de quitação = data do empréstimo. Diferente de escolher "Quitado" no Status abaixo.
+              </p>
+            </div>
+            <Controller
+              control={form.control}
+              name="ja_quitado"
+              render={({ field }) => (
+                <Switch checked={field.value ?? false} onCheckedChange={field.onChange} />
+              )}
+            />
+          </div>
+
+          {watched.ja_quitado ? (
+            <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+              Este empréstimo será salvo como quitado, com valor quitado igual ao principal e data de quitação igual à data do empréstimo.
+            </p>
+          ) : (
+            <>
           {/* Juros + Prazo */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
@@ -272,6 +301,8 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
               </div>
             </div>
           )}
+            </>
+          )}
 
           {/* Observações */}
           <div className="flex flex-col gap-1.5">
@@ -285,7 +316,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
           </div>
 
           {/* Preview */}
-          {preview && (
+          {preview && !watched.ja_quitado && (
             <div
               className="rounded-xl p-3 flex flex-col gap-1 border"
               style={{ background: 'rgba(0,198,255,0.07)', borderColor: 'rgba(0,198,255,0.25)' }}

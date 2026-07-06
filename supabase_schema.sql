@@ -62,6 +62,7 @@ create table if not exists public.emprestimos (
   valor_quitado                 numeric(14,2),
   data_negociacao               date,
   valor_negociado               numeric(14,2),
+  retroativo                    boolean not null default false,
   observacoes                   text,
   created_at                    timestamptz not null default now(),
   updated_at                    timestamptz not null default now()
@@ -111,24 +112,29 @@ select
   e.valor_quitado,
   e.data_negociacao,
   e.valor_negociado,
+  e.retroativo,
   e.observacoes,
   e.created_at,
 
-  -- Juros do período original (fixo, para referência)
-  round(e.valor_principal * (e.taxa_juros / 100.0), 2)                       as valor_juros,
+  -- Juros do período original (fixo, para referência) — 0 se retroativo
+  case when e.retroativo then 0
+       else round(e.valor_principal * (e.taxa_juros / 100.0), 2)
+  end                                                                        as valor_juros,
 
-  -- Valor no vencimento original (sem atraso)
-  round(e.valor_principal * (1 + e.taxa_juros / 100.0), 2)                   as valor_no_vencimento,
+  -- Valor no vencimento original (sem atraso) — só o principal se retroativo
+  case when e.retroativo then e.valor_principal
+       else round(e.valor_principal * (1 + e.taxa_juros / 100.0), 2)
+  end                                                                        as valor_no_vencimento,
 
   case
-    when e.status = 'quitado' then 0
+    when e.status = 'quitado' or e.retroativo then 0
     when ref.data_ref > e.data_vencimento then (ref.data_ref - e.data_vencimento)
     else 0
   end                                                                        as dias_atraso,
 
   -- Períodos de atraso (ceil: sobe no dia 1 de atraso, não depois de prazo_dias)
   case
-    when e.status = 'quitado' or ref.data_ref <= e.data_vencimento then 0
+    when e.status = 'quitado' or e.retroativo or ref.data_ref <= e.data_vencimento then 0
     else ceil((ref.data_ref - e.data_vencimento)::numeric / e.prazo_dias)::int
   end                                                                        as periodos_atraso,
 
@@ -137,23 +143,26 @@ select
 
   -- Mora diária: aplica-se apenas nos dias do período atual (incompleto)
   case
-    when e.status <> 'quitado' and ref.data_ref > e.data_vencimento
+    when e.status <> 'quitado' and not e.retroativo and ref.data_ref > e.data_vencimento
       then round(e.juros_mora_diario_reais * ((ref.data_ref - e.data_vencimento) % e.prazo_dias), 2)
     else 0
   end                                                                        as valor_mora,
 
+  -- retroativo nunca é 'atrasado' — sem juros/mora não faz sentido cobrar urgência
   case
     when e.status = 'quitado'   then 'quitado'
     when e.status = 'negociado' then 'negociado'
+    when e.retroativo then 'em_dia'
     when current_date > e.data_vencimento then 'atrasado'
     else 'em_dia'
   end                                                                        as situacao,
 
   -- Valor total devido: juros simples recorrentes a cada período vencido
   -- + mora diária do período atual (incompleto), calculado sobre data_ref
-  -- valor_negociado manual tem prioridade sobre o cálculo, quando presente
+  -- retroativo (só principal) e valor_negociado manual têm prioridade
   case
     when e.status = 'quitado' then 0
+    when e.retroativo then e.valor_principal
     when e.status = 'negociado' and e.valor_negociado is not null then e.valor_negociado
     when ref.data_ref <= e.data_vencimento then
       round(e.valor_principal * (1 + e.taxa_juros / 100.0), 2)

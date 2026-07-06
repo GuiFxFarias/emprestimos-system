@@ -58,15 +58,21 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
   const quitado = e.status === 'quitado'
   const negociado = e.status === 'negociado'
   const negociadoComValor = negociado && e.valor_negociado != null
+  const retroativo = e.retroativo
 
   const pagoAtraso = pagamentos
     .filter(p => p.destino === 'atraso')
     .reduce((s, p) => s + p.valor, 0)
-  const atrasoPago = e.valor_mora > 0.005 && pagoAtraso >= e.valor_mora - 0.005
+  // "pago" também é true quando não há mora a pagar (nada devido = nada pendente)
+  const atrasoPago = e.valor_mora <= 0.005 || pagoAtraso >= e.valor_mora - 0.005
 
   const jurosTotal = Number((e.valor_juros * (1 + e.periodos_atraso)).toFixed(2))
   const pagoJuros = pagamentos.filter(p => p.destino === 'juros').reduce((s, p) => s + p.valor, 0)
-  const jurosPago = jurosTotal > 0.005 && pagoJuros >= jurosTotal - 0.005
+  const jurosPago = jurosTotal <= 0.005 || pagoJuros >= jurosTotal - 0.005
+
+  // Atrasado mas com juros e mora do período em dia: não é mais "atrasado", é "em aberto"
+  // (só falta o principal — deixa de gerar urgência até vencer um novo período)
+  const emAberto = atrasado && atrasoPago && jurosPago
 
   const totalPago = pagamentos
     .filter(p => p.tipo === 'parcial')
@@ -77,7 +83,9 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     : 0
 
   const borderClass = atrasado && !jurosPago ? 'pulse-danger' : ''
-  const borderColor = atrasado && !jurosPago
+  const borderColor = emAberto
+    ? 'var(--border)'
+    : atrasado
     ? 'rgba(255,84,112,0.5)'
     : venceHoje
     ? 'var(--destructive)'
@@ -90,7 +98,9 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
   const timelineItems: TimelineItem[] = [
     {
       date: e.data_emprestimo,
-      label: `Empréstimo de ${formatBRL(e.valor_principal)} (${e.taxa_juros}% juros, ${e.prazo_dias}d)`,
+      label: retroativo
+        ? `Empréstimo de ${formatBRL(e.valor_principal)} (retroativo, sem juros/mora)`
+        : `Empréstimo de ${formatBRL(e.valor_principal)} (${e.taxa_juros}% juros, ${e.prazo_dias}d)`,
       value: e.valor_principal,
       type: 'criado',
     },
@@ -116,6 +126,8 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
       date: e.data_vencimento,
       label: venceHoje
         ? `Vence hoje — ${formatBRL(e.valor_total_devido)}`
+        : emAberto
+        ? `Venceu em ${formatDate(e.data_vencimento)} — juros e mora em dia, falta o principal`
         : atrasado
         ? `Venceu — ${e.dias_atraso}d de atraso — ${formatBRL(e.valor_total_devido)}`
         : `Vence em ${formatDate(e.data_vencimento)} — ${formatBRL(e.valor_no_vencimento)}`,
@@ -130,7 +142,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     if (type === 'quitado') return '#00e5cc'
     if (type === 'pagamento') return 'var(--warning)'
     if (type === 'vencimento') {
-      if (atrasado || venceHoje) return 'var(--destructive)'
+      if ((atrasado && !emAberto) || venceHoje) return 'var(--destructive)'
       return 'var(--muted-foreground)'
     }
     return 'var(--muted-foreground)'
@@ -140,11 +152,13 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     if (type === 'criado') return <TrendingUp className="w-3 h-3" />
     if (type === 'quitado') return <CheckCircle2 className="w-3 h-3" />
     if (type === 'pagamento') return <CreditCard className="w-3 h-3" />
-    if (type === 'vencimento' && (atrasado || venceHoje)) return <AlertCircle className="w-3 h-3" />
+    if (type === 'vencimento' && ((atrasado && !emAberto) || venceHoje)) return <AlertCircle className="w-3 h-3" />
     return <Clock className="w-3 h-3" />
   }
 
-  const situacaoColor = atrasado && !jurosPago
+  const situacaoColor = emAberto
+    ? 'var(--primary)'
+    : atrasado
     ? 'var(--destructive)'
     : venceHoje
     ? 'var(--destructive)'
@@ -154,8 +168,10 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     ? '#8b5cf6'
     : 'var(--primary)'
 
-  const situacaoLabel = atrasado
-    ? (atrasoPago ? 'Atrasado' : `Atrasado ${e.dias_atraso}d`)
+  const situacaoLabel = emAberto
+    ? 'Em aberto'
+    : atrasado
+    ? `Atrasado ${e.dias_atraso}d`
     : venceHoje
     ? 'Vence hoje'
     : quitado
@@ -194,7 +210,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
           <p className="font-semibold text-sm" style={{ color: 'var(--foreground)' }}>
             {formatBRL(e.valor_principal)}
             <span className="font-normal text-xs ml-1.5" style={{ color: 'var(--muted-foreground)' }}>
-              principal · {e.taxa_juros}% juros
+              {retroativo ? 'principal · sem juros/mora' : `principal · ${e.taxa_juros}% juros`}
             </span>
           </p>
           {!quitado && (
@@ -212,6 +228,11 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
                 : e.data_negociacao
                 ? `Congelado em ${formatDate(e.data_negociacao)}`
                 : 'Cálculo não congelado — juros e mora continuam correndo'}
+            </p>
+          )}
+          {retroativo && !quitado && (
+            <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+              Retroativo — sem juros ou mora
             </p>
           )}
         </div>
@@ -245,7 +266,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
                 className="text-xs"
                 style={{ background: `${situacaoColor}20`, color: situacaoColor, border: 'none' }}
               >
-                {atrasado && <AlertCircle className="w-3 h-3 mr-1" />}
+                {atrasado && !emAberto && <AlertCircle className="w-3 h-3 mr-1" />}
                 {quitado && <CheckCircle2 className="w-3 h-3 mr-1" />}
                 {situacaoLabel}
               </Badge>
@@ -290,6 +311,11 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
               <div className="flex items-center gap-1.5">
                 <span style={{ color: 'var(--muted-foreground)' }}>Valor negociado</span>
                 <span style={{ color: '#8b5cf6', fontWeight: 500 }}>{formatBRL(e.valor_negociado ?? 0)}</span>
+              </div>
+            ) : retroativo ? (
+              <div className="flex items-center gap-1.5">
+                <span style={{ color: 'var(--muted-foreground)' }}>Principal (retroativo, sem juros/mora)</span>
+                <span style={{ color: 'var(--foreground)', fontWeight: 500 }}>{formatBRL(e.valor_principal)}</span>
               </div>
             ) : (
               <>
@@ -405,7 +431,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
                 <p
                   className="text-xs"
                   style={{
-                    color: isLast && (atrasado || venceHoje) ? 'var(--destructive)' : isLast && quitado ? '#00e5cc' : 'var(--foreground)',
+                    color: isLast && ((atrasado && !emAberto) || venceHoje) ? 'var(--destructive)' : isLast && quitado ? '#00e5cc' : 'var(--foreground)',
                     fontWeight: isLast ? 600 : 400,
                   }}
                 >
