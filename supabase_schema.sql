@@ -61,6 +61,7 @@ create table if not exists public.emprestimos (
   data_quitacao                 date,
   valor_quitado                 numeric(14,2),
   data_negociacao               date,
+  valor_negociado               numeric(14,2),
   observacoes                   text,
   created_at                    timestamptz not null default now(),
   updated_at                    timestamptz not null default now()
@@ -109,6 +110,7 @@ select
   e.data_quitacao,
   e.valor_quitado,
   e.data_negociacao,
+  e.valor_negociado,
   e.observacoes,
   e.created_at,
 
@@ -149,8 +151,10 @@ select
 
   -- Valor total devido: juros simples recorrentes a cada período vencido
   -- + mora diária do período atual (incompleto), calculado sobre data_ref
+  -- valor_negociado manual tem prioridade sobre o cálculo, quando presente
   case
     when e.status = 'quitado' then 0
+    when e.status = 'negociado' and e.valor_negociado is not null then e.valor_negociado
     when ref.data_ref <= e.data_vencimento then
       round(e.valor_principal * (1 + e.taxa_juros / 100.0), 2)
     else

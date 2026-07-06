@@ -57,6 +57,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
   const atrasado = e.situacao === 'atrasado'
   const quitado = e.status === 'quitado'
   const negociado = e.status === 'negociado'
+  const negociadoComValor = negociado && e.valor_negociado != null
 
   const pagoAtraso = pagamentos
     .filter(p => p.destino === 'atraso')
@@ -206,7 +207,9 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
           )}
           {negociado && (
             <p className="text-xs mt-0.5" style={{ color: '#8b5cf6' }}>
-              {e.data_negociacao
+              {negociadoComValor
+                ? 'Valor negociado manualmente — substitui o cálculo automático'
+                : e.data_negociacao
                 ? `Congelado em ${formatDate(e.data_negociacao)}`
                 : 'Cálculo não congelado — juros e mora continuam correndo'}
             </p>
@@ -283,29 +286,38 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
       {!quitado && (
         <div className="mb-4 rounded-xl overflow-hidden text-xs" style={{ background: 'var(--muted)' }}>
           <div className="px-3 py-2.5 flex flex-col gap-1.5">
-            <div className="flex items-center gap-1.5">
-              <span style={{ color: 'var(--muted-foreground)' }}>Principal</span>
-              <span style={{ color: 'var(--foreground)', fontWeight: 500 }}>{formatBRL(e.valor_principal)}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span style={{ color: 'var(--muted-foreground)' }}>Juros ({e.taxa_juros}%)</span>
-              <span style={{ color: 'var(--primary)' }}>+ {formatBRL(e.valor_juros)}</span>
-            </div>
-            {jurosRenovacoes > 0 && (
+            {negociadoComValor ? (
               <div className="flex items-center gap-1.5">
-                <span style={{ color: 'var(--muted-foreground)' }}>
-                  Renovação ({e.periodos_atraso}× {e.taxa_juros}%)
-                </span>
-                <span style={{ color: 'var(--destructive)' }}>+ {formatBRL(jurosRenovacoes)}</span>
+                <span style={{ color: 'var(--muted-foreground)' }}>Valor negociado</span>
+                <span style={{ color: '#8b5cf6', fontWeight: 500 }}>{formatBRL(e.valor_negociado ?? 0)}</span>
               </div>
-            )}
-            {e.valor_mora > 0 && (
-              <div className="flex items-center gap-1.5">
-                <span style={{ color: 'var(--muted-foreground)' }}>
-                  Mora ({(e.dias_atraso % e.prazo_dias)}d × {formatBRL(e.juros_mora_diario_reais)}/d)
-                </span>
-                <span style={{ color: 'var(--destructive)' }}>+ {formatBRL(e.valor_mora)}</span>
-              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-1.5">
+                  <span style={{ color: 'var(--muted-foreground)' }}>Principal</span>
+                  <span style={{ color: 'var(--foreground)', fontWeight: 500 }}>{formatBRL(e.valor_principal)}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span style={{ color: 'var(--muted-foreground)' }}>Juros ({e.taxa_juros}%)</span>
+                  <span style={{ color: 'var(--primary)' }}>+ {formatBRL(e.valor_juros)}</span>
+                </div>
+                {jurosRenovacoes > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <span style={{ color: 'var(--muted-foreground)' }}>
+                      Renovação ({e.periodos_atraso}× {e.taxa_juros}%)
+                    </span>
+                    <span style={{ color: 'var(--destructive)' }}>+ {formatBRL(jurosRenovacoes)}</span>
+                  </div>
+                )}
+                {e.valor_mora > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <span style={{ color: 'var(--muted-foreground)' }}>
+                      Mora ({(e.dias_atraso % e.prazo_dias)}d × {formatBRL(e.juros_mora_diario_reais)}/d)
+                    </span>
+                    <span style={{ color: 'var(--destructive)' }}>+ {formatBRL(e.valor_mora)}</span>
+                  </div>
+                )}
+              </>
             )}
             {totalPago > 0 && (
               <div className="flex items-center gap-1.5">

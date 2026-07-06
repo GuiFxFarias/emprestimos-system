@@ -18,6 +18,7 @@ import {
   DollarSign,
   Calendar,
   ArrowUp,
+  Handshake,
 } from 'lucide-react'
 import type { EmprestimoCalculado } from '@/lib/types'
 import Link from 'next/link'
@@ -98,6 +99,13 @@ export function DashboardView({
         color: 'var(--destructive)',
       },
       {
+        label: 'Negociado',
+        value: formatBRL(negociados.reduce((s, e) => s + e.valor_total_devido, 0)),
+        sub: `${negociados.length} empréstimo${negociados.length !== 1 ? 's' : ''}`,
+        icon: <Handshake className="w-5 h-5" />,
+        color: '#8b5cf6',
+      },
+      {
         label: 'Total recebido',
         value: formatBRL(totalRecebido),
         icon: <CheckCircle2 className="w-5 h-5" />,
@@ -110,7 +118,7 @@ export function DashboardView({
         color: '#00e5cc',
       },
     ]
-  }, [ativos, atrasados, pagamentos])
+  }, [ativos, atrasados, negociados, pagamentos])
 
   const donutData = useMemo(() => [
     { name: 'Em dia', value: ativos.filter(e => e.situacao === 'em_dia').length, color: 'var(--primary)' },
@@ -149,7 +157,7 @@ export function DashboardView({
 
       {isLoading ? (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-          {Array.from({ length: 6 }).map((_, i) => (
+          {Array.from({ length: 7 }).map((_, i) => (
             <Skeleton key={i} className="h-24 rounded-2xl" style={{ background: 'var(--muted)' }} />
           ))}
         </div>

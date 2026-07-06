@@ -221,6 +221,7 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
         data_quitacao: values.status === 'quitado' ? (values.data_quitacao || null) : null,
         valor_quitado: values.status === 'quitado' ? (values.valor_quitado ?? null) : null,
         data_negociacao: values.status === 'negociado' && values.congelar_negociacao ? (values.data_negociacao || null) : null,
+        valor_negociado: values.status === 'negociado' ? (values.valor_negociado ?? null) : null,
       }).eq('id', editandoEmp.id)
       if (error) throw new Error(error.message)
     },

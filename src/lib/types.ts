@@ -40,6 +40,7 @@ export interface Emprestimo {
   data_quitacao: string | null
   valor_quitado: number | null
   data_negociacao: string | null
+  valor_negociado: number | null
   observacoes: string | null
   created_at: string
   updated_at: string
@@ -61,6 +62,7 @@ export interface EmprestimoCalculado {
   data_quitacao: string | null
   valor_quitado: number | null
   data_negociacao: string | null
+  valor_negociado: number | null
   observacoes: string | null
   created_at: string
   valor_juros: number

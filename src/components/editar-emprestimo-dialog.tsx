@@ -36,6 +36,7 @@ const schema = z.object({
   valor_quitado: z.number().min(0).optional(),
   congelar_negociacao: z.boolean().optional(),
   data_negociacao: z.string().optional(),
+  valor_negociado: z.number().min(0).optional(),
 })
 
 export type EditEmprestimoFormValues = z.infer<typeof schema>
@@ -62,6 +63,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
       valor_quitado: undefined,
       congelar_negociacao: false,
       data_negociacao: '',
+      valor_negociado: undefined,
     },
   })
 
@@ -79,6 +81,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
         valor_quitado: emprestimo.valor_quitado ?? undefined,
         congelar_negociacao: !!emprestimo.data_negociacao,
         data_negociacao: emprestimo.data_negociacao ?? '',
+        valor_negociado: emprestimo.valor_negociado ?? undefined,
       })
     }
   }, [emprestimo, form])
@@ -230,6 +233,18 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
                   />
                 </div>
               )}
+              <div className="flex flex-col gap-1.5">
+                <Label style={{ color: 'var(--muted-foreground)' }}>Valor negociado (R$)</Label>
+                <Input
+                  type="number" step="0.01" min="0"
+                  placeholder="Deixe em branco para usar o valor calculado"
+                  {...form.register('valor_negociado', { valueAsNumber: true })}
+                  style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
+                />
+                <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  Se preenchido, substitui o total devido calculado (use para descontos/acordos que fogem da fórmula).
+                </p>
+              </div>
               <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                 Use as anotações do empréstimo para registrar o que foi acordado.
               </p>
