@@ -132,10 +132,11 @@ select
     else 0
   end                                                                        as dias_atraso,
 
-  -- Períodos de atraso (ceil: sobe no dia 1 de atraso, não depois de prazo_dias)
+  -- Períodos de atraso (floor: só soma o próximo período de juros quando um
+  -- prazo_dias completo se passou — antes disso é só mora diária)
   case
     when e.status = 'quitado' or e.retroativo or ref.data_ref <= e.data_vencimento then 0
-    else ceil((ref.data_ref - e.data_vencimento)::numeric / e.prazo_dias)::int
+    else floor((ref.data_ref - e.data_vencimento)::numeric / e.prazo_dias)::int
   end                                                                        as periodos_atraso,
 
   -- Multa removida — mantida zerada para compatibilidade
@@ -170,7 +171,7 @@ select
       round(
         e.valor_principal * (1 + e.taxa_juros / 100.0)
         + e.valor_principal * (e.taxa_juros / 100.0)
-          * ceil((ref.data_ref - e.data_vencimento)::numeric / e.prazo_dias)
+          * floor((ref.data_ref - e.data_vencimento)::numeric / e.prazo_dias)
         + e.juros_mora_diario_reais
           * ((ref.data_ref - e.data_vencimento) % e.prazo_dias)
       , 2)
