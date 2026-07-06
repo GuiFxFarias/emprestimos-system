@@ -23,6 +23,6 @@ export async function serverFetchConfiguracoes(): Promise<Configuracoes | null> 
 
 export async function serverFetchAllPagamentos(): Promise<PagamentoResumo[]> {
   const supabase = await createClient()
-  const { data } = await supabase.from('pagamentos').select('id, emprestimo_id, valor')
+  const { data } = await supabase.from('pagamentos').select('id, emprestimo_id, valor, destino')
   return (data ?? []) as PagamentoResumo[]
 }

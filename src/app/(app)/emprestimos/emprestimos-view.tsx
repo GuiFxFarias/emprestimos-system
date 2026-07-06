@@ -8,7 +8,9 @@ import {
   fetchClientes,
   fetchConfiguracoes,
   fetchClienteDetail,
+  fetchAllPagamentos,
   type ClienteDetailData,
+  type PagamentoResumo,
 } from '@/lib/queries'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -30,9 +32,10 @@ interface Props {
   initialClientes: Cliente[]
   initialEmprestimos: EmprestimoCalculado[]
   initialConfig: Configuracoes | null
+  initialPagamentos: PagamentoResumo[]
 }
 
-export function EmprestimosView({ initialClientes, initialEmprestimos, initialConfig }: Props) {
+export function EmprestimosView({ initialClientes, initialEmprestimos, initialConfig, initialPagamentos }: Props) {
   const queryClient = useQueryClient()
 
   const [search, setSearch] = useState('')
@@ -60,6 +63,12 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
     initialData: initialConfig,
   })
 
+  const { data: pagamentos = [] } = useQuery({
+    queryKey: queryKeys.pagamentos(),
+    queryFn: fetchAllPagamentos,
+    initialData: initialPagamentos,
+  })
+
   const loadingList = loadingClientes || loadingEmps
 
   const { data: detail, isLoading: loadingDetail } = useQuery({
@@ -69,6 +78,17 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
   })
 
   // ── Derived data ──────────────────────────────────────────────
+  // Soma de pagamentos já registrados, por empréstimo (total e só juros)
+  const pagosPorEmp = useMemo(() => {
+    const map: Record<string, { total: number; juros: number }> = {}
+    for (const p of pagamentos) {
+      if (!map[p.emprestimo_id]) map[p.emprestimo_id] = { total: 0, juros: 0 }
+      map[p.emprestimo_id].total += p.valor
+      if (p.destino === 'juros') map[p.emprestimo_id].juros += p.valor
+    }
+    return map
+  }, [pagamentos])
+
   const clienteStats = useMemo((): ClienteEmprestimoStats[] => {
     const statsMap: Record<string, { totalAtivo: number; totalDevido: number; totalJuros: number; totalNegociado: number; temAtrasado: boolean; temNegociado: boolean; temVenceHoje: boolean; ativos: number }> = {}
 
@@ -79,15 +99,16 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
       if (e.status === 'ativo' || e.status === 'negociado') {
         statsMap[e.cliente_id].ativos++
       }
+      const pago = pagosPorEmp[e.id] ?? { total: 0, juros: 0 }
       if (e.status === 'ativo') {
         statsMap[e.cliente_id].totalAtivo += e.valor_principal
-        statsMap[e.cliente_id].totalDevido += e.valor_total_devido
-        statsMap[e.cliente_id].totalJuros += e.valor_juros * (1 + e.periodos_atraso)
+        statsMap[e.cliente_id].totalDevido += Math.max(0, e.valor_total_devido - pago.total)
+        statsMap[e.cliente_id].totalJuros += Math.max(0, e.valor_juros * (1 + e.periodos_atraso) - pago.juros)
         if (e.situacao === 'atrasado') statsMap[e.cliente_id].temAtrasado = true
         if (e.situacao === 'em_dia' && e.data_vencimento === HOJE) statsMap[e.cliente_id].temVenceHoje = true
       } else if (e.status === 'negociado') {
         statsMap[e.cliente_id].temNegociado = true
-        statsMap[e.cliente_id].totalNegociado += e.valor_total_devido
+        statsMap[e.cliente_id].totalNegociado += Math.max(0, e.valor_total_devido - pago.total)
       }
     }
 
@@ -105,7 +126,7 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
       temVenceHoje: statsMap[c.id]?.temVenceHoje ?? false,
       emprestimosAtivos: statsMap[c.id]?.ativos ?? 0,
     }))
-  }, [clientes, allEmprestimos])
+  }, [clientes, allEmprestimos, pagosPorEmp])
 
   const filteredClientes = useMemo(() =>
     clienteStats.filter(c =>

@@ -1,12 +1,17 @@
 'use client'
 
 import { memo, useState } from 'react'
+import { addDays, parseISO, format as formatDateFns } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { AlertCircle, CheckCircle2, Clock, CreditCard, TrendingUp, Pencil, MessageSquarePlus, Trash2, Loader2 } from 'lucide-react'
 import { formatBRL, formatDate } from '@/lib/format'
 import type { EmprestimoCalculado, Pagamento, AnotacaoEmprestimo } from '@/lib/types'
+
+function addDiasToDataString(dateStr: string, dias: number): string {
+  return formatDateFns(addDays(parseISO(dateStr), dias), 'yyyy-MM-dd')
+}
 
 interface Props {
   e: EmprestimoCalculado
@@ -34,7 +39,7 @@ interface TimelineItem {
   date: string
   label: string
   value?: number
-  type: 'criado' | 'pagamento' | 'vencimento' | 'quitado'
+  type: 'criado' | 'pagamento' | 'vencimento' | 'vencimento_passado' | 'quitado'
 }
 
 export const EmprestimoTimeline = memo(function EmprestimoTimeline({
@@ -122,17 +127,34 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
       })
     }
   } else {
-    timelineItems.push({
-      date: e.data_vencimento,
-      label: venceHoje
-        ? `Vence hoje — ${formatBRL(e.valor_total_devido)}`
-        : emAberto
-        ? `Venceu em ${formatDate(e.data_vencimento)} — juros e mora em dia, falta o principal`
-        : atrasado
-        ? `Venceu — ${e.dias_atraso}d de atraso — ${formatBRL(e.valor_total_devido)}`
-        : `Vence em ${formatDate(e.data_vencimento)} — ${formatBRL(e.valor_no_vencimento)}`,
-      type: 'vencimento',
-    })
+    // Um item por período de vencimento: os já vencidos sem pagamento (histórico
+    // de renovação) e o próximo — que vira uma nova renovação se não for pago.
+    for (let periodo = 0; periodo <= e.periodos_atraso; periodo++) {
+      const dataPeriodo = addDiasToDataString(e.data_vencimento, periodo * e.prazo_dias)
+      const isProximo = periodo === e.periodos_atraso
+
+      if (isProximo) {
+        timelineItems.push({
+          date: dataPeriodo,
+          label: venceHoje
+            ? `Vence hoje — ${formatBRL(e.valor_total_devido)}`
+            : emAberto
+            ? `Vence em ${formatDate(dataPeriodo)} — juros e mora em dia, falta o principal`
+            : atrasado
+            ? `Vence em ${formatDate(dataPeriodo)} (renova se não pago) — ${e.dias_atraso}d de atraso — ${formatBRL(e.valor_total_devido)}`
+            : `Vence em ${formatDate(dataPeriodo)} — ${formatBRL(e.valor_no_vencimento)}`,
+          type: 'vencimento',
+        })
+      } else {
+        timelineItems.push({
+          date: dataPeriodo,
+          label: periodo === 0
+            ? `Venceu em ${formatDate(dataPeriodo)} — não pago`
+            : `Renovação — venceu em ${formatDate(dataPeriodo)} sem pagamento — + ${formatBRL(e.valor_juros)} de juros`,
+          type: 'vencimento_passado',
+        })
+      }
+    }
   }
 
   timelineItems.sort((a, b) => a.date.localeCompare(b.date))
@@ -141,6 +163,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     if (type === 'criado') return 'var(--primary)'
     if (type === 'quitado') return '#00e5cc'
     if (type === 'pagamento') return 'var(--warning)'
+    if (type === 'vencimento_passado') return 'var(--muted-foreground)'
     if (type === 'vencimento') {
       if ((atrasado && !emAberto) || venceHoje) return 'var(--destructive)'
       return 'var(--muted-foreground)'
@@ -152,6 +175,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     if (type === 'criado') return <TrendingUp className="w-3 h-3" />
     if (type === 'quitado') return <CheckCircle2 className="w-3 h-3" />
     if (type === 'pagamento') return <CreditCard className="w-3 h-3" />
+    if (type === 'vencimento_passado') return <Clock className="w-3 h-3" />
     if (type === 'vencimento' && ((atrasado && !emAberto) || venceHoje)) return <AlertCircle className="w-3 h-3" />
     return <Clock className="w-3 h-3" />
   }
@@ -411,7 +435,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
         {timelineItems.map((item, idx) => {
           const isLast = idx === timelineItems.length - 1
           const color = dotColor(item.type)
-          const isFutureVencimento = item.type === 'vencimento' && !atrasado && !venceHoje && !quitado
+          const isFutureVencimento = item.type === 'vencimento' && item.date > hoje
 
           return (
             <div key={idx} className={`relative flex items-start gap-3 ${isLast ? '' : 'mb-3'}`}>

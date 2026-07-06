@@ -17,7 +17,6 @@ import {
   CheckCircle2,
   DollarSign,
   Calendar,
-  ArrowUp,
   Handshake,
 } from 'lucide-react'
 import type { EmprestimoCalculado } from '@/lib/types'
@@ -59,18 +58,25 @@ export function DashboardView({
     negociados: emprestimos.filter(e => e.situacao === 'negociado'),
   }), [emprestimos])
 
+  // Soma de pagamentos já registrados, por empréstimo (total e só juros)
+  const pagosPorEmp = useMemo(() => {
+    const map: Record<string, { total: number; juros: number }> = {}
+    for (const p of pagamentos) {
+      if (!map[p.emprestimo_id]) map[p.emprestimo_id] = { total: 0, juros: 0 }
+      map[p.emprestimo_id].total += p.valor
+      if (p.destino === 'juros') map[p.emprestimo_id].juros += p.valor
+    }
+    return map
+  }, [pagamentos])
+
   const metrics = useMemo(() => {
     const totalRecebido = pagamentos.reduce((s, p) => s + p.valor, 0)
 
-    const jurosAReceber = ativos.reduce(
-      (s, e) => s + e.valor_total_devido - e.valor_principal - e.valor_mora,
-      0
-    )
-
-    const anoMes = new Date().toISOString().slice(0, 7)
-    const rendaMensalJuros = ativos
-      .filter(e => e.data_vencimento.startsWith(anoMes))
-      .reduce((s, e) => s + e.valor_juros, 0)
+    const jurosAReceber = ativos.reduce((s, e) => {
+      const jurosBruto = e.valor_total_devido - e.valor_principal - e.valor_mora
+      const pagoJuros = pagosPorEmp[e.id]?.juros ?? 0
+      return s + Math.max(0, jurosBruto - pagoJuros)
+    }, 0)
 
     return [
       {
@@ -93,14 +99,14 @@ export function DashboardView({
       },
       {
         label: 'Em atraso',
-        value: formatBRL(atrasados.reduce((s, e) => s + e.valor_total_devido, 0)),
+        value: formatBRL(atrasados.reduce((s, e) => s + Math.max(0, e.valor_total_devido - (pagosPorEmp[e.id]?.total ?? 0)), 0)),
         sub: `${atrasados.length} empréstimo${atrasados.length !== 1 ? 's' : ''}`,
         icon: <AlertCircle className="w-5 h-5" />,
         color: 'var(--destructive)',
       },
       {
         label: 'Negociado',
-        value: formatBRL(negociados.reduce((s, e) => s + e.valor_total_devido, 0)),
+        value: formatBRL(negociados.reduce((s, e) => s + Math.max(0, e.valor_total_devido - (pagosPorEmp[e.id]?.total ?? 0)), 0)),
         sub: `${negociados.length} empréstimo${negociados.length !== 1 ? 's' : ''}`,
         icon: <Handshake className="w-5 h-5" />,
         color: '#8b5cf6',
@@ -111,14 +117,8 @@ export function DashboardView({
         icon: <CheckCircle2 className="w-5 h-5" />,
         color: '#00e5cc',
       },
-      {
-        label: 'Renda mensal juros',
-        value: formatBRL(rendaMensalJuros),
-        icon: <ArrowUp className="w-5 h-5" />,
-        color: '#00e5cc',
-      },
     ]
-  }, [ativos, atrasados, negociados, pagamentos])
+  }, [ativos, atrasados, negociados, pagamentos, pagosPorEmp])
 
   const donutData = useMemo(() => [
     { name: 'Em dia', value: ativos.filter(e => e.situacao === 'em_dia').length, color: 'var(--primary)' },
@@ -157,7 +157,7 @@ export function DashboardView({
 
       {isLoading ? (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-          {Array.from({ length: 7 }).map((_, i) => (
+          {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-24 rounded-2xl" style={{ background: 'var(--muted)' }} />
           ))}
         </div>

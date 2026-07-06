@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/client'
-import type { EmprestimoCalculado, Cliente, Configuracoes, Pagamento, AnotacaoEmprestimo } from '@/lib/types'
+import type { EmprestimoCalculado, Cliente, Configuracoes, Pagamento, AnotacaoEmprestimo, PagamentoDestino } from '@/lib/types'
 
 // ── Query Keys ────────────────────────────────────────────────
 export const queryKeys = {
@@ -27,11 +27,12 @@ export interface PagamentoResumo {
   id: string
   emprestimo_id: string
   valor: number
+  destino: PagamentoDestino | null
 }
 
 export async function fetchAllPagamentos(): Promise<PagamentoResumo[]> {
   const supabase = createClient()
-  const { data } = await supabase.from('pagamentos').select('id, emprestimo_id, valor')
+  const { data } = await supabase.from('pagamentos').select('id, emprestimo_id, valor, destino')
   return (data ?? []) as PagamentoResumo[]
 }
 

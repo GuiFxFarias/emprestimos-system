@@ -40,6 +40,14 @@ const schema = z.object({
   ja_quitado: z.boolean().optional(),
 })
 
+// valueAsNumber vira NaN quando o input fica vazio; isso converte pra
+// undefined em vez de deixar o Zod rejeitar um campo opcional
+function toOptionalNumber(v: string): number | undefined {
+  if (v === '') return undefined
+  const n = Number(v)
+  return Number.isNaN(n) ? undefined : n
+}
+
 export type EditEmprestimoFormValues = z.infer<typeof schema>
 
 interface Props {
@@ -146,7 +154,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
             className="rounded-xl p-3 border flex items-center justify-between gap-3"
             style={{ background: 'var(--muted)', borderColor: 'var(--border)' }}
           >
-            <div>
+            <div className="flex-1 min-w-0">
               <Label style={{ color: 'var(--foreground)' }}>Já quitado (histórico)</Label>
               <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
                 Marca como já pago desde sempre — valor quitado = principal, data de quitação = data do empréstimo. Diferente de escolher "Quitado" no Status abaixo.
@@ -156,7 +164,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
               control={form.control}
               name="ja_quitado"
               render={({ field }) => (
-                <Switch checked={field.value ?? false} onCheckedChange={field.onChange} />
+                <Switch className="shrink-0" checked={field.value ?? false} onCheckedChange={field.onChange} />
               )}
             />
           </div>
@@ -230,7 +238,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
               style={{ background: 'var(--muted)', borderColor: 'var(--border)' }}
             >
               <div className="flex items-center justify-between gap-3">
-                <div>
+                <div className="flex-1 min-w-0">
                   <Label style={{ color: 'var(--foreground)' }}>Congelar cálculo nesta data</Label>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
                     Trava juros/mora/dias de atraso na data do acordo. Se desligado, os cálculos continuam normalmente.
@@ -241,6 +249,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
                   name="congelar_negociacao"
                   render={({ field }) => (
                     <Switch
+                      className="shrink-0"
                       checked={field.value ?? false}
                       onCheckedChange={checked => {
                         field.onChange(checked)
@@ -267,7 +276,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
                 <Input
                   type="number" step="0.01" min="0"
                   placeholder="Deixe em branco para usar o valor calculado"
-                  {...form.register('valor_negociado', { valueAsNumber: true })}
+                  {...form.register('valor_negociado', { setValueAs: toOptionalNumber })}
                   style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
                 />
                 <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
@@ -295,7 +304,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
                 <Label style={{ color: 'var(--muted-foreground)' }}>Valor quitado (R$)</Label>
                 <Input
                   type="number" step="0.01" min="0"
-                  {...form.register('valor_quitado', { valueAsNumber: true })}
+                  {...form.register('valor_quitado', { setValueAs: toOptionalNumber })}
                   style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
                 />
               </div>
