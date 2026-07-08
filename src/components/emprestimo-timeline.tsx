@@ -75,6 +75,8 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
   const pagoJuros = pagamentos.filter(p => p.destino === 'juros').reduce((s, p) => s + p.valor, 0)
   const jurosPago = jurosTotal <= 0.005 || pagoJuros >= jurosTotal - 0.005
 
+  const pagoPrincipal = pagamentos.filter(p => p.destino === 'principal').reduce((s, p) => s + p.valor, 0)
+
   // Atrasado mas com juros e mora do período em dia: não é mais "atrasado", é "em aberto"
   // (só falta o principal — deixa de gerar urgência até vencer um novo período)
   const emAberto = atrasado && atrasoPago && jurosPago
@@ -82,10 +84,17 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
   const totalPago = pagamentos
     .filter(p => p.tipo === 'parcial')
     .reduce((sum, p) => sum + p.valor, 0)
-  const saldoDevedor = Math.round(Math.max(0, e.valor_total_devido - totalPago) * 100) / 100
-  const jurosRenovacoes = e.periodos_atraso > 0
-    ? Math.round(e.valor_juros * e.periodos_atraso * 100) / 100
-    : 0
+
+  // Restante por categoria (capado em 0): pagar a mais numa categoria (ex.: 3000
+  // de juros quando só 1800 é devido) não pode abater o que falta nas outras.
+  // Negociado com valor manual é exceção — o total já é um número fechado.
+  const principalRestante = Math.max(0, e.valor_principal - pagoPrincipal)
+  const jurosRestante = Math.max(0, jurosTotal - pagoJuros)
+  const moraRestante = Math.max(0, e.valor_mora - pagoAtraso)
+  const pagoEfetivo = (e.valor_principal - principalRestante) + (jurosTotal - jurosRestante) + (e.valor_mora - moraRestante)
+  const saldoDevedor = negociadoComValor
+    ? Math.round(Math.max(0, e.valor_total_devido - totalPago) * 100) / 100
+    : Math.round((principalRestante + jurosRestante + moraRestante) * 100) / 100
 
   const borderClass = atrasado && !jurosPago ? 'pulse-danger' : ''
   const borderColor = emAberto
@@ -333,7 +342,9 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
           <div className="px-3 py-2.5 flex flex-col gap-1.5">
             {negociadoComValor ? (
               <div className="flex items-center gap-1.5">
-                <span style={{ color: 'var(--muted-foreground)' }}>Valor negociado</span>
+                <span style={{ color: 'var(--muted-foreground)' }}>
+                  Valor negociado{e.parcelas_negociado ? ` (${e.parcelas_negociado}x)` : ''}
+                </span>
                 <span style={{ color: '#8b5cf6', fontWeight: 500 }}>{formatBRL(e.valor_negociado ?? 0)}</span>
               </div>
             ) : retroativo ? (
@@ -348,17 +359,13 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
                   <span style={{ color: 'var(--foreground)', fontWeight: 500 }}>{formatBRL(e.valor_principal)}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span style={{ color: 'var(--muted-foreground)' }}>Juros ({e.taxa_juros}%)</span>
-                  <span style={{ color: 'var(--primary)' }}>+ {formatBRL(e.valor_juros)}</span>
+                  <span style={{ color: 'var(--muted-foreground)' }}>
+                    Juros {e.periodos_atraso > 0 ? `(${e.periodos_atraso + 1}× ${e.taxa_juros}%)` : `(${e.taxa_juros}%)`}
+                  </span>
+                  <span style={{ color: e.periodos_atraso > 0 ? 'var(--destructive)' : 'var(--primary)' }}>
+                    + {formatBRL(e.periodos_atraso > 0 ? jurosTotal : e.valor_juros)}
+                  </span>
                 </div>
-                {jurosRenovacoes > 0 && (
-                  <div className="flex items-center gap-1.5">
-                    <span style={{ color: 'var(--muted-foreground)' }}>
-                      Renovação ({e.periodos_atraso}× {e.taxa_juros}%)
-                    </span>
-                    <span style={{ color: 'var(--destructive)' }}>+ {formatBRL(jurosRenovacoes)}</span>
-                  </div>
-                )}
                 {e.valor_mora > 0 && (
                   <div className="flex items-center gap-1.5">
                     <span style={{ color: 'var(--muted-foreground)' }}>
@@ -372,7 +379,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
             {totalPago > 0 && (
               <div className="flex items-center gap-1.5">
                 <span style={{ color: 'var(--muted-foreground)' }}>Já pago</span>
-                <span style={{ color: '#00e5cc' }}>− {formatBRL(totalPago)}</span>
+                <span style={{ color: '#00e5cc' }}>− {formatBRL(negociadoComValor ? totalPago : pagoEfetivo)}</span>
               </div>
             )}
           </div>

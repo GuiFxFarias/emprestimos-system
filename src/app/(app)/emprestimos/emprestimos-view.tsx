@@ -80,11 +80,12 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
   // ── Derived data ──────────────────────────────────────────────
   // Soma de pagamentos já registrados, por empréstimo (total e só juros)
   const pagosPorEmp = useMemo(() => {
-    const map: Record<string, { total: number; juros: number }> = {}
+    const map: Record<string, { total: number; juros: number; principal: number }> = {}
     for (const p of pagamentos) {
-      if (!map[p.emprestimo_id]) map[p.emprestimo_id] = { total: 0, juros: 0 }
+      if (!map[p.emprestimo_id]) map[p.emprestimo_id] = { total: 0, juros: 0, principal: 0 }
       map[p.emprestimo_id].total += p.valor
       if (p.destino === 'juros') map[p.emprestimo_id].juros += p.valor
+      if (p.destino === 'principal') map[p.emprestimo_id].principal += p.valor
     }
     return map
   }, [pagamentos])
@@ -99,10 +100,10 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
       if (e.status === 'ativo' || e.status === 'negociado') {
         statsMap[e.cliente_id].ativos++
       }
-      const pago = pagosPorEmp[e.id] ?? { total: 0, juros: 0 }
+      const pago = pagosPorEmp[e.id] ?? { total: 0, juros: 0, principal: 0 }
       if (e.status === 'ativo') {
         statsMap[e.cliente_id].totalAtivo += e.valor_principal
-        statsMap[e.cliente_id].totalDevido += Math.max(0, e.valor_total_devido - pago.total)
+        statsMap[e.cliente_id].totalDevido += Math.max(0, e.valor_principal - pago.principal)
         statsMap[e.cliente_id].totalJuros += Math.max(0, e.valor_juros * (1 + e.periodos_atraso) - pago.juros)
         if (e.situacao === 'atrasado') statsMap[e.cliente_id].temAtrasado = true
         if (e.situacao === 'em_dia' && e.data_vencimento === HOJE) statsMap[e.cliente_id].temVenceHoje = true
@@ -250,6 +251,7 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
           : values.status === 'quitado' ? (values.valor_quitado ?? null) : null,
         data_negociacao: !values.ja_quitado && values.status === 'negociado' && values.congelar_negociacao ? (values.data_negociacao || null) : null,
         valor_negociado: !values.ja_quitado && values.status === 'negociado' ? (values.valor_negociado ?? null) : null,
+        parcelas_negociado: !values.ja_quitado && values.status === 'negociado' ? (values.parcelas_negociado ?? null) : null,
       }).eq('id', editandoEmp.id)
       if (error) throw new Error(error.message)
     },

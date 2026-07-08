@@ -22,8 +22,6 @@ import { calcularPreview } from '@/lib/calculo'
 import { formatBRL } from '@/lib/format'
 import type { Cliente, Configuracoes } from '@/lib/types'
 
-type TipoCadastro = 'normal' | 'quitado'
-
 const schema = z.object({
   cliente_id: z.string().min(1, 'Selecione um cliente'),
   valor_principal: z.number().min(0.01, 'Valor deve ser maior que zero'),
@@ -62,12 +60,6 @@ export function NovoEmprestimoDialog({ open, onOpenChange, clientes, config, onS
   })
 
   const watched = form.watch()
-
-  const tipoCadastro: TipoCadastro = watched.ja_quitado ? 'quitado' : 'normal'
-
-  function handleTipoCadastroChange(v: TipoCadastro) {
-    form.setValue('ja_quitado', v === 'quitado')
-  }
 
   const preview = (() => {
     const { valor_principal, taxa_juros, prazo_dias, data_emprestimo } = watched
@@ -144,34 +136,6 @@ export function NovoEmprestimoDialog({ open, onOpenChange, clientes, config, onS
             {form.formState.errors.cliente_id && (
               <p className="text-xs" style={{ color: 'var(--destructive)' }}>{form.formState.errors.cliente_id.message}</p>
             )}
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label style={{ color: 'var(--muted-foreground)' }}>Tipo de cadastro</Label>
-            <Select
-              items={[
-                { value: 'normal', label: 'Normal' },
-                { value: 'quitado', label: 'Já quitado — já foi pago' },
-              ]}
-              value={tipoCadastro}
-              onValueChange={v => handleTipoCadastroChange(v as TipoCadastro)}
-            >
-              <SelectTrigger
-                className="w-full"
-                style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="normal">Normal</SelectItem>
-                <SelectItem value="quitado">Já quitado — já foi pago</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-              {tipoCadastro === 'quitado'
-                ? 'Empréstimo antigo já pago — entra direto como quitado, com valor quitado igual ao principal.'
-                : 'Calcula juros e mora normalmente, conforme a taxa e o prazo informados.'}
-            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

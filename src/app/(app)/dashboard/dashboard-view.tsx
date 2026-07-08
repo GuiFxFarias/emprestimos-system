@@ -72,11 +72,21 @@ export function DashboardView({
   const metrics = useMemo(() => {
     const totalRecebido = pagamentos.reduce((s, p) => s + p.valor, 0)
 
-    const jurosAReceber = ativos.reduce((s, e) => {
-      const jurosBruto = e.valor_total_devido - e.valor_principal - e.valor_mora
-      const pagoJuros = pagosPorEmp[e.id]?.juros ?? 0
-      return s + Math.max(0, jurosBruto - pagoJuros)
-    }, 0)
+    // Juros do período atual (o que vence neste ciclo) vs. juros de períodos já
+    // vencidos sem pagamento (acumulado de atraso). Pagamentos de juros abatem
+    // primeiro o atraso (dívida mais antiga) e o restante o período atual.
+    let jurosAReceber = 0
+    let jurosEmAtraso = 0
+    for (const e of ativos) {
+      const jurosPeriodoAtual = e.valor_juros
+      const jurosAtrasados = e.valor_juros * e.periodos_atraso
+      let pagoJuros = pagosPorEmp[e.id]?.juros ?? 0
+      const pagoAtrasados = Math.min(pagoJuros, jurosAtrasados)
+      pagoJuros -= pagoAtrasados
+      const pagoAtual = Math.min(pagoJuros, jurosPeriodoAtual)
+      jurosEmAtraso += Math.max(0, jurosAtrasados - pagoAtrasados)
+      jurosAReceber += Math.max(0, jurosPeriodoAtual - pagoAtual)
+    }
 
     return [
       {
@@ -99,7 +109,7 @@ export function DashboardView({
       },
       {
         label: 'Em atraso',
-        value: formatBRL(atrasados.reduce((s, e) => s + Math.max(0, e.valor_total_devido - (pagosPorEmp[e.id]?.total ?? 0)), 0)),
+        value: formatBRL(jurosEmAtraso),
         sub: `${atrasados.length} empréstimo${atrasados.length !== 1 ? 's' : ''}`,
         icon: <AlertCircle className="w-5 h-5" />,
         color: 'var(--destructive)',

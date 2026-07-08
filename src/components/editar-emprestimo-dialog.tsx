@@ -37,6 +37,7 @@ const schema = z.object({
   congelar_negociacao: z.boolean().optional(),
   data_negociacao: z.string().optional(),
   valor_negociado: z.number().min(0).optional(),
+  parcelas_negociado: z.number().int().min(1).optional(),
   ja_quitado: z.boolean().optional(),
 })
 
@@ -73,6 +74,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
       congelar_negociacao: false,
       data_negociacao: '',
       valor_negociado: undefined,
+      parcelas_negociado: undefined,
       ja_quitado: false,
     },
   })
@@ -92,6 +94,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
         congelar_negociacao: !!emprestimo.data_negociacao,
         data_negociacao: emprestimo.data_negociacao ?? '',
         valor_negociado: emprestimo.valor_negociado ?? undefined,
+        parcelas_negociado: emprestimo.parcelas_negociado ?? undefined,
         ja_quitado: false,
       })
     }
@@ -135,9 +138,20 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
               <Label style={{ color: 'var(--muted-foreground)' }}>Principal (R$)</Label>
               <Input
                 type="number" step="0.01" min="0.01"
+                disabled={status === 'negociado'}
                 {...form.register('valor_principal', { valueAsNumber: true })}
-                style={{ background: 'var(--input)', borderColor: form.formState.errors.valor_principal ? 'var(--destructive)' : 'var(--border)', color: 'var(--foreground)' }}
+                style={{
+                  background: 'var(--input)',
+                  borderColor: form.formState.errors.valor_principal ? 'var(--destructive)' : 'var(--border)',
+                  color: 'var(--foreground)',
+                  ...(status === 'negociado' ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
+                }}
               />
+              {status === 'negociado' && (
+                <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  Travado durante negociação — use &quot;Valor negociado&quot; abaixo, o principal não muda.
+                </p>
+              )}
             </div>
             <div className="flex flex-col gap-1.5">
               <Label style={{ color: 'var(--muted-foreground)' }}>Data do empréstimo</Label>
@@ -157,7 +171,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
             <div className="flex-1 min-w-0">
               <Label style={{ color: 'var(--foreground)' }}>Já quitado (histórico)</Label>
               <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-                Marca como já pago desde sempre — valor quitado = principal, data de quitação = data do empréstimo. Diferente de escolher "Quitado" no Status abaixo.
+                Marca como já pago desde sempre — valor quitado = principal, data de quitação = data do empréstimo. Diferente de escolher &quot;Quitado&quot; no Status abaixo.
               </p>
             </div>
             <Controller
@@ -281,6 +295,18 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
                 />
                 <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                   Se preenchido, substitui o total devido calculado (use para descontos/acordos que fogem da fórmula).
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label style={{ color: 'var(--muted-foreground)' }}>Em quantas vezes</Label>
+                <Input
+                  type="number" step="1" min="1"
+                  placeholder="Ex: 3"
+                  {...form.register('parcelas_negociado', { setValueAs: toOptionalNumber })}
+                  style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
+                />
+                <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  Só um registro informativo de quantas parcelas foram combinadas — não gera parcelas nem muda o cálculo.
                 </p>
               </div>
               <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>

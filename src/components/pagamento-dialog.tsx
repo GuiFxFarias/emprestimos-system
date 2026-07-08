@@ -52,13 +52,26 @@ function calcularRestantes(emp: EmprestimoCalculado, pagamentos: Pagamento[]): R
   const pagoJuros = somarPorDestino(pagamentos, 'juros')
   const pagoAtraso = somarPorDestino(pagamentos, 'atraso')
   const pagoPrincipal = somarPorDestino(pagamentos, 'principal')
-  const pagoTotal = pagoJuros + pagoAtraso + pagoPrincipal
+
+  const principal = Math.max(0, Number((emp.valor_principal - pagoPrincipal).toFixed(2)))
+  const juros = Math.max(0, Number((jurosTotal - pagoJuros).toFixed(2)))
+  const atraso = Math.max(0, Number((emp.valor_mora - pagoAtraso).toFixed(2)))
+
+  // Negociado com valor manual: o total é o valor negociado, não a soma de
+  // principal/juros/mora (esses continuam calculados por baixo, mas o acordo
+  // manual tem prioridade — igual o valor_total_devido da view).
+  const negociadoComValor = emp.status === 'negociado' && emp.valor_negociado != null
+  const total = negociadoComValor
+    ? Math.max(0, Number((emp.valor_negociado! - (pagoJuros + pagoAtraso + pagoPrincipal)).toFixed(2)))
+    // soma dos restantes por categoria: pagar a mais numa categoria (ex.: 3000
+    // de juros quando só 1800 é devido) não abate o que falta nas outras
+    : Math.round((principal + juros + atraso) * 100) / 100
 
   return {
-    principal: Math.max(0, Number((emp.valor_principal - pagoPrincipal).toFixed(2))),
-    juros: Math.max(0, Number((jurosTotal - pagoJuros).toFixed(2))),
-    atraso: Math.max(0, Number((emp.valor_mora - pagoAtraso).toFixed(2))),
-    total: Math.max(0, Number((emp.valor_total_devido - pagoTotal).toFixed(2))),
+    principal,
+    juros,
+    atraso,
+    total,
     pagoJuros,
     pagoAtraso,
     pagoPrincipal,
@@ -217,24 +230,14 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <Label style={rowStyle}>Valor pago (R$)</Label>
-              <span className="text-xs" style={rowStyle}>Máx: {formatBRL(maxValor)}</span>
+              <span className="text-xs" style={rowStyle}>Sugerido: {formatBRL(maxValor)}</span>
             </div>
             <Input
               type="number"
               step="0.01"
               min="0.01"
-              readOnly={isQuitacao}
-              style={{
-                ...inputStyle,
-                ...(isQuitacao ? { background: 'var(--muted)', cursor: 'not-allowed', opacity: 0.8 } : {}),
-              }}
-              {...form.register('valor', {
-                valueAsNumber: true,
-                validate: v => {
-                  const max = getRestante(form.getValues('destino') as Destino)
-                  return v <= max + 0.005 || `Máximo para este tipo: ${formatBRL(max)}`
-                },
-              })}
+              style={inputStyle}
+              {...form.register('valor', { valueAsNumber: true })}
             />
             {form.formState.errors.valor && (
               <p className="text-xs" style={{ color: '#ff5470' }}>
