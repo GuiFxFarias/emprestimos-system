@@ -45,27 +45,44 @@ interface Restantes {
   pagoJuros: number
   pagoAtraso: number
   pagoPrincipal: number
+  negociadoComValor: boolean
 }
 
-function calcularRestantes(emp: EmprestimoCalculado, pagamentos: Pagamento[]): Restantes {
+// Empréstimo negociado com valor manual (valor_negociado × parcelas_negociado)
+// é um acordo à parte: pagamentos feitos ANTES da negociação (tags
+// principal/juros/atraso da fórmula antiga) não abatem o valor combinado —
+// só pagamentos com destino 'quitacao' (o único disponível depois de
+// negociar) contam pro total do acordo.
+export function calcularRestantes(emp: EmprestimoCalculado, pagamentos: Pagamento[]): Restantes {
+  const negociadoComValor = emp.status === 'negociado' && emp.valor_negociado != null
+
   const jurosTotal = Number((emp.valor_juros * (1 + emp.periodos_atraso)).toFixed(2))
   const pagoJuros = somarPorDestino(pagamentos, 'juros')
   const pagoAtraso = somarPorDestino(pagamentos, 'atraso')
   const pagoPrincipal = somarPorDestino(pagamentos, 'principal')
 
+  if (negociadoComValor) {
+    const totalNegociado = emp.valor_negociado! * (emp.parcelas_negociado ?? 1)
+    const pagoQuitacao = somarPorDestino(pagamentos, 'quitacao')
+    return {
+      principal: 0,
+      juros: 0,
+      atraso: 0,
+      total: Math.max(0, Number((totalNegociado - pagoQuitacao).toFixed(2))),
+      pagoJuros,
+      pagoAtraso,
+      pagoPrincipal,
+      negociadoComValor: true,
+    }
+  }
+
   const principal = Math.max(0, Number((emp.valor_principal - pagoPrincipal).toFixed(2)))
   const juros = Math.max(0, Number((jurosTotal - pagoJuros).toFixed(2)))
   const atraso = Math.max(0, Number((emp.valor_mora - pagoAtraso).toFixed(2)))
 
-  // Negociado com valor manual: o total é o valor negociado, não a soma de
-  // principal/juros/mora (esses continuam calculados por baixo, mas o acordo
-  // manual tem prioridade — igual o valor_total_devido da view).
-  const negociadoComValor = emp.status === 'negociado' && emp.valor_negociado != null
-  const total = negociadoComValor
-    ? Math.max(0, Number((emp.valor_negociado! - (pagoJuros + pagoAtraso + pagoPrincipal)).toFixed(2)))
-    // soma dos restantes por categoria: pagar a mais numa categoria (ex.: 3000
-    // de juros quando só 1800 é devido) não abate o que falta nas outras
-    : Math.round((principal + juros + atraso) * 100) / 100
+  // soma dos restantes por categoria: pagar a mais numa categoria (ex.: 3000
+  // de juros quando só 1800 é devido) não abate o que falta nas outras
+  const total = Math.round((principal + juros + atraso) * 100) / 100
 
   return {
     principal,
@@ -75,6 +92,7 @@ function calcularRestantes(emp: EmprestimoCalculado, pagamentos: Pagamento[]): R
     pagoJuros,
     pagoAtraso,
     pagoPrincipal,
+    negociadoComValor: false,
   }
 }
 
@@ -115,6 +133,9 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
 
   const r = calcularRestantes(emprestimo, pagamentos)
   const jurosTotal = Number((emprestimo.valor_juros * (1 + emprestimo.periodos_atraso)).toFixed(2))
+  const totalNegociado = emprestimo.valor_negociado != null
+    ? emprestimo.valor_negociado * (emprestimo.parcelas_negociado ?? 1)
+    : 0
 
   function getRestante(d: Destino): number {
     switch (d) {
@@ -126,7 +147,13 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
   }
 
   const maxValor = getRestante(destino)
-  const isQuitacao = destino === 'quitacao'
+  const valorAtual = form.watch('valor')
+  // Negociado com valor: só existe a opção "quitação" (pagamento avulso contra
+  // o acordo) — só considera "quitar o empréstimo" quando o valor cobre o
+  // restante inteiro, senão é só mais uma parcela paga.
+  const isQuitacao = r.negociadoComValor
+    ? valorAtual >= r.total - 0.005
+    : destino === 'quitacao'
   const temAtraso = emprestimo.dias_atraso > 0 && emprestimo.valor_mora > 0
 
   function handleDestinoChange(newDestino: Destino) {
@@ -153,32 +180,43 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
           <p className="text-xs font-semibold mb-2" style={rowStyle}>Resumo da dívida</p>
           <div className="flex flex-col gap-1">
 
-            <BreakdownRow
-              label="Principal"
-              total={emprestimo.valor_principal}
-              pago={r.pagoPrincipal}
-              restante={r.principal}
-            />
+            {r.negociadoComValor ? (
+              <div className="flex justify-between text-sm">
+                <span style={{ color: 'var(--muted-foreground)' }}>
+                  Valor negociado{emprestimo.parcelas_negociado ? ` (${emprestimo.parcelas_negociado}x)` : ''}
+                </span>
+                <span style={{ color: '#8b5cf6', fontWeight: 500 }}>{formatBRL(totalNegociado)}</span>
+              </div>
+            ) : (
+              <>
+                <BreakdownRow
+                  label="Principal"
+                  total={emprestimo.valor_principal}
+                  pago={r.pagoPrincipal}
+                  restante={r.principal}
+                />
 
-            {jurosTotal > 0 && (
-              <BreakdownRow
-                label={emprestimo.periodos_atraso > 0
-                  ? `Juros (${1 + emprestimo.periodos_atraso}× ${emprestimo.taxa_juros}%)`
-                  : `Juros (${emprestimo.taxa_juros}%)`}
-                total={jurosTotal}
-                pago={r.pagoJuros}
-                restante={r.juros}
-              />
-            )}
+                {jurosTotal > 0 && (
+                  <BreakdownRow
+                    label={emprestimo.periodos_atraso > 0
+                      ? `Juros (${1 + emprestimo.periodos_atraso}× ${emprestimo.taxa_juros}%)`
+                      : `Juros (${emprestimo.taxa_juros}%)`}
+                    total={jurosTotal}
+                    pago={r.pagoJuros}
+                    restante={r.juros}
+                  />
+                )}
 
-            {temAtraso && (
-              <BreakdownRow
-                label={`Mora (${emprestimo.dias_atraso} dia${emprestimo.dias_atraso > 1 ? 's' : ''})`}
-                total={emprestimo.valor_mora}
-                pago={r.pagoAtraso}
-                restante={r.atraso}
-                danger
-              />
+                {temAtraso && (
+                  <BreakdownRow
+                    label={`Mora (${emprestimo.dias_atraso} dia${emprestimo.dias_atraso > 1 ? 's' : ''})`}
+                    total={emprestimo.valor_mora}
+                    pago={r.pagoAtraso}
+                    restante={r.atraso}
+                    danger
+                  />
+                )}
+              </>
             )}
 
             <div
@@ -195,37 +233,39 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
         </div>
 
         <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label style={rowStyle}>Destinação do pagamento</Label>
-            <Select
-              items={[
-                { value: 'quitacao', label: `Quitação total — ${formatBRL(r.total)}` },
-                ...(r.principal > 0 ? [{ value: 'principal', label: `Principal (dívida) — ${formatBRL(r.principal)}` }] : []),
-                ...(r.juros > 0 ? [{ value: 'juros', label: `Juros — ${formatBRL(r.juros)}` }] : []),
-                ...(temAtraso && r.atraso > 0 ? [{ value: 'atraso', label: `Mora / Atraso (${emprestimo.dias_atraso} dia${emprestimo.dias_atraso > 1 ? 's' : ''}) — ${formatBRL(r.atraso)}` }] : []),
-              ]}
-              value={destino}
-              onValueChange={v => handleDestinoChange(v as Destino)}
-            >
-              <SelectTrigger className="w-full" style={inputStyle}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="quitacao">Quitação total — {formatBRL(r.total)}</SelectItem>
-                {r.principal > 0 && (
-                  <SelectItem value="principal">Principal (dívida) — {formatBRL(r.principal)}</SelectItem>
-                )}
-                {r.juros > 0 && (
-                  <SelectItem value="juros">Juros — {formatBRL(r.juros)}</SelectItem>
-                )}
-                {temAtraso && r.atraso > 0 && (
-                  <SelectItem value="atraso">
-                    Mora / Atraso ({emprestimo.dias_atraso} dia{emprestimo.dias_atraso > 1 ? 's' : ''}) — {formatBRL(r.atraso)}
-                  </SelectItem>
-                )}
-              </SelectContent>
-            </Select>
-          </div>
+          {!r.negociadoComValor && (
+            <div className="flex flex-col gap-1.5">
+              <Label style={rowStyle}>Destinação do pagamento</Label>
+              <Select
+                items={[
+                  { value: 'quitacao', label: `Quitação total — ${formatBRL(r.total)}` },
+                  ...(r.principal > 0 ? [{ value: 'principal', label: `Principal (dívida) — ${formatBRL(r.principal)}` }] : []),
+                  ...(r.juros > 0 ? [{ value: 'juros', label: `Juros — ${formatBRL(r.juros)}` }] : []),
+                  ...(temAtraso && r.atraso > 0 ? [{ value: 'atraso', label: `Mora / Atraso (${emprestimo.dias_atraso} dia${emprestimo.dias_atraso > 1 ? 's' : ''}) — ${formatBRL(r.atraso)}` }] : []),
+                ]}
+                value={destino}
+                onValueChange={v => handleDestinoChange(v as Destino)}
+              >
+                <SelectTrigger className="w-full" style={inputStyle}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="quitacao">Quitação total — {formatBRL(r.total)}</SelectItem>
+                  {r.principal > 0 && (
+                    <SelectItem value="principal">Principal (dívida) — {formatBRL(r.principal)}</SelectItem>
+                  )}
+                  {r.juros > 0 && (
+                    <SelectItem value="juros">Juros — {formatBRL(r.juros)}</SelectItem>
+                  )}
+                  {temAtraso && r.atraso > 0 && (
+                    <SelectItem value="atraso">
+                      Mora / Atraso ({emprestimo.dias_atraso} dia{emprestimo.dias_atraso > 1 ? 's' : ''}) — {formatBRL(r.atraso)}
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">

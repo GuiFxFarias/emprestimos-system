@@ -20,7 +20,7 @@ import { Input } from '@/components/ui/input'
 import { ClienteEmprestimoCard, type ClienteEmprestimoStats } from '@/components/cliente-emprestimo-card'
 import { EmprestimoTimeline } from '@/components/emprestimo-timeline'
 import { NovoEmprestimoDialog, type EmprestimoFormValues } from '@/components/emprestimo-form'
-import { PagamentoDialog, type PagamentoFormValues } from '@/components/pagamento-dialog'
+import { PagamentoDialog, type PagamentoFormValues, calcularRestantes } from '@/components/pagamento-dialog'
 import { EditarEmprestimoDialog, type EditEmprestimoFormValues } from '@/components/editar-emprestimo-dialog'
 import { ClienteAvatar } from '@/components/cliente-avatar'
 import { HandCoins, Plus, ArrowLeft, Search } from 'lucide-react'
@@ -80,36 +80,44 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
   // ── Derived data ──────────────────────────────────────────────
   // Soma de pagamentos já registrados, por empréstimo (total e só juros)
   const pagosPorEmp = useMemo(() => {
-    const map: Record<string, { total: number; juros: number; principal: number }> = {}
+    const map: Record<string, { total: number; juros: number; principal: number; quitacao: number }> = {}
     for (const p of pagamentos) {
-      if (!map[p.emprestimo_id]) map[p.emprestimo_id] = { total: 0, juros: 0, principal: 0 }
+      if (!map[p.emprestimo_id]) map[p.emprestimo_id] = { total: 0, juros: 0, principal: 0, quitacao: 0 }
       map[p.emprestimo_id].total += p.valor
       if (p.destino === 'juros') map[p.emprestimo_id].juros += p.valor
       if (p.destino === 'principal') map[p.emprestimo_id].principal += p.valor
+      if (p.destino === 'quitacao') map[p.emprestimo_id].quitacao += p.valor
     }
     return map
   }, [pagamentos])
 
   const clienteStats = useMemo((): ClienteEmprestimoStats[] => {
-    const statsMap: Record<string, { totalAtivo: number; totalDevido: number; totalJuros: number; totalNegociado: number; temAtrasado: boolean; temNegociado: boolean; temVenceHoje: boolean; ativos: number }> = {}
+    const statsMap: Record<string, { totalAtivo: number; totalDevido: number; totalJuros: number; totalJurosFixo: number; totalNegociado: number; temAtrasado: boolean; temNegociado: boolean; temVenceHoje: boolean; ativos: number }> = {}
 
     for (const e of allEmprestimos) {
       if (!statsMap[e.cliente_id]) {
-        statsMap[e.cliente_id] = { totalAtivo: 0, totalDevido: 0, totalJuros: 0, totalNegociado: 0, temAtrasado: false, temNegociado: false, temVenceHoje: false, ativos: 0 }
+        statsMap[e.cliente_id] = { totalAtivo: 0, totalDevido: 0, totalJuros: 0, totalJurosFixo: 0, totalNegociado: 0, temAtrasado: false, temNegociado: false, temVenceHoje: false, ativos: 0 }
       }
       if (e.status === 'ativo' || e.status === 'negociado') {
         statsMap[e.cliente_id].ativos++
       }
-      const pago = pagosPorEmp[e.id] ?? { total: 0, juros: 0, principal: 0 }
+      const pago = pagosPorEmp[e.id] ?? { total: 0, juros: 0, principal: 0, quitacao: 0 }
       if (e.status === 'ativo') {
         statsMap[e.cliente_id].totalAtivo += e.valor_principal
         statsMap[e.cliente_id].totalDevido += Math.max(0, e.valor_principal - pago.principal)
         statsMap[e.cliente_id].totalJuros += Math.max(0, e.valor_juros * (1 + e.periodos_atraso) - pago.juros)
+        // Juros fixo: valor do juro calculado sobre o emprestado, independente
+        // de ter gerado (períodos de atraso) ou sido pago
+        statsMap[e.cliente_id].totalJurosFixo += e.valor_juros
         if (e.situacao === 'atrasado') statsMap[e.cliente_id].temAtrasado = true
         if (e.situacao === 'em_dia' && e.data_vencimento === HOJE) statsMap[e.cliente_id].temVenceHoje = true
       } else if (e.status === 'negociado') {
         statsMap[e.cliente_id].temNegociado = true
-        statsMap[e.cliente_id].totalNegociado += Math.max(0, e.valor_total_devido - pago.total)
+        // valor_negociado é um acordo à parte: só pagamentos feitos como
+        // "quitação" do acordo abatem — pagamentos antigos de juros/principal
+        // de antes de negociar não contam mais aqui
+        const pagoNegociado = e.valor_negociado != null ? pago.quitacao : pago.total
+        statsMap[e.cliente_id].totalNegociado += Math.max(0, e.valor_total_devido - pagoNegociado)
       }
     }
 
@@ -121,6 +129,7 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
       totalAtivo: statsMap[c.id]?.totalAtivo ?? 0,
       totalDevido: statsMap[c.id]?.totalDevido ?? 0,
       totalJuros: statsMap[c.id]?.totalJuros ?? 0,
+      totalJurosFixo: statsMap[c.id]?.totalJurosFixo ?? 0,
       totalNegociado: statsMap[c.id]?.totalNegociado ?? 0,
       temAtrasado: statsMap[c.id]?.temAtrasado ?? false,
       temNegociado: statsMap[c.id]?.temNegociado ?? false,
@@ -182,7 +191,16 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
       if (!pagamentoEmp) return
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
-      const tipo = values.destino === 'quitacao' ? 'quitacao' : 'parcial'
+
+      // Negociado com valor: destino é sempre 'quitacao', mas isso não
+      // significa que o pagamento quita tudo — só quita quando o valor
+      // pago cobre o restante do acordo (senão é só mais uma parcela).
+      const negociadoComValor = pagamentoEmp.status === 'negociado' && pagamentoEmp.valor_negociado != null
+      const quitaTudo = negociadoComValor
+        ? values.destino === 'quitacao'
+          && values.valor >= calcularRestantes(pagamentoEmp, pagamentosPorEmp[pagamentoEmp.id] ?? []).total - 0.005
+        : values.destino === 'quitacao'
+      const tipo = quitaTudo ? 'quitacao' : 'parcial'
 
       const { error: pagError } = await supabase.from('pagamentos').insert({
         owner_id: user!.id,
@@ -195,7 +213,7 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
       })
       if (pagError) throw new Error(pagError.message)
 
-      if (values.destino === 'quitacao') {
+      if (quitaTudo) {
         const { error: updError } = await supabase.from('emprestimos').update({
           status: 'quitado',
           data_quitacao: values.data_pagamento,
@@ -203,15 +221,15 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
         }).eq('id', pagamentoEmp.id)
         if (updError) throw new Error(updError.message)
       }
+      return { quitaTudo }
     },
-    onSuccess: (_, values) => {
+    onSuccess: (result, values) => {
       const msgs: Record<string, string> = {
-        quitacao: 'Empréstimo quitado!',
         principal: 'Pagamento do principal registrado!',
         juros: 'Pagamento dos juros registrado!',
         atraso: 'Pagamento da mora registrado!',
       }
-      toast.success(msgs[values.destino] ?? 'Pagamento registrado!')
+      toast.success(result?.quitaTudo ? 'Empréstimo quitado!' : (msgs[values.destino] ?? 'Pagamento registrado!'))
       setPagamentoEmp(null)
       invalidateAll()
     },

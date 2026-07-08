@@ -27,7 +27,7 @@ interface Props {
 
 function labelDestino(destino: string | null, tipo: string): string {
   switch (destino) {
-    case 'quitacao':  return 'Quitação'
+    case 'quitacao':  return tipo === 'quitacao' ? 'Quitação' : 'Pagamento (negociado)'
     case 'principal': return 'Pagamento — Principal'
     case 'juros':     return 'Pagamento — Juros'
     case 'atraso':    return 'Pagamento — Mora'
@@ -85,6 +85,13 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     .filter(p => p.tipo === 'parcial')
     .reduce((sum, p) => sum + p.valor, 0)
 
+  // Negociado com valor: é um acordo à parte — pagamentos de antes de
+  // negociar (juros/principal/atraso da fórmula antiga) não abatem, só o
+  // que foi pago como "quitação" do próprio acordo conta.
+  const pagoNegociado = pagamentos
+    .filter(p => p.destino === 'quitacao')
+    .reduce((s, p) => s + p.valor, 0)
+
   // Restante por categoria (capado em 0): pagar a mais numa categoria (ex.: 3000
   // de juros quando só 1800 é devido) não pode abater o que falta nas outras.
   // Negociado com valor manual é exceção — o total já é um número fechado.
@@ -93,7 +100,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
   const moraRestante = Math.max(0, e.valor_mora - pagoAtraso)
   const pagoEfetivo = (e.valor_principal - principalRestante) + (jurosTotal - jurosRestante) + (e.valor_mora - moraRestante)
   const saldoDevedor = negociadoComValor
-    ? Math.round(Math.max(0, e.valor_total_devido - totalPago) * 100) / 100
+    ? Math.round(Math.max(0, e.valor_total_devido - pagoNegociado) * 100) / 100
     : Math.round((principalRestante + jurosRestante + moraRestante) * 100) / 100
 
   const borderClass = atrasado && !jurosPago ? 'pulse-danger' : ''
@@ -376,10 +383,10 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
                 )}
               </>
             )}
-            {totalPago > 0 && (
+            {(negociadoComValor ? pagoNegociado : totalPago) > 0 && (
               <div className="flex items-center gap-1.5">
                 <span style={{ color: 'var(--muted-foreground)' }}>Já pago</span>
-                <span style={{ color: '#00e5cc' }}>− {formatBRL(negociadoComValor ? totalPago : pagoEfetivo)}</span>
+                <span style={{ color: '#00e5cc' }}>− {formatBRL(negociadoComValor ? pagoNegociado : pagoEfetivo)}</span>
               </div>
             )}
           </div>

@@ -58,13 +58,14 @@ export function DashboardView({
     negociados: emprestimos.filter(e => e.situacao === 'negociado'),
   }), [emprestimos])
 
-  // Soma de pagamentos já registrados, por empréstimo (total e só juros)
+  // Soma de pagamentos já registrados, por empréstimo (total, só juros e só quitação)
   const pagosPorEmp = useMemo(() => {
-    const map: Record<string, { total: number; juros: number }> = {}
+    const map: Record<string, { total: number; juros: number; quitacao: number }> = {}
     for (const p of pagamentos) {
-      if (!map[p.emprestimo_id]) map[p.emprestimo_id] = { total: 0, juros: 0 }
+      if (!map[p.emprestimo_id]) map[p.emprestimo_id] = { total: 0, juros: 0, quitacao: 0 }
       map[p.emprestimo_id].total += p.valor
       if (p.destino === 'juros') map[p.emprestimo_id].juros += p.valor
+      if (p.destino === 'quitacao') map[p.emprestimo_id].quitacao += p.valor
     }
     return map
   }, [pagamentos])
@@ -72,20 +73,25 @@ export function DashboardView({
   const metrics = useMemo(() => {
     const totalRecebido = pagamentos.reduce((s, p) => s + p.valor, 0)
 
-    // Juros do período atual (o que vence neste ciclo) vs. juros de períodos já
-    // vencidos sem pagamento (acumulado de atraso). Pagamentos de juros abatem
-    // primeiro o atraso (dívida mais antiga) e o restante o período atual.
+    // Juros ainda não pagos: vai pra "a receber" enquanto o empréstimo está
+    // em dia (ainda não venceu), e pra "em atraso" assim que a situação
+    // (que já considera os pagamentos de juros feitos) vira 'atrasado'.
     let jurosAReceber = 0
     let jurosEmAtraso = 0
+    let jurosFixos = 0
     for (const e of ativos) {
-      const jurosPeriodoAtual = e.valor_juros
-      const jurosAtrasados = e.valor_juros * e.periodos_atraso
-      let pagoJuros = pagosPorEmp[e.id]?.juros ?? 0
-      const pagoAtrasados = Math.min(pagoJuros, jurosAtrasados)
-      pagoJuros -= pagoAtrasados
-      const pagoAtual = Math.min(pagoJuros, jurosPeriodoAtual)
-      jurosEmAtraso += Math.max(0, jurosAtrasados - pagoAtrasados)
-      jurosAReceber += Math.max(0, jurosPeriodoAtual - pagoAtual)
+      if (e.status === 'negociado') continue // contabilizado no card "Negociado"
+      const jurosTotal = e.valor_juros * (1 + e.periodos_atraso)
+      const pagoJuros = pagosPorEmp[e.id]?.juros ?? 0
+      const restante = Math.max(0, jurosTotal - pagoJuros)
+      if (e.situacao === 'atrasado') {
+        jurosEmAtraso += restante
+      } else {
+        jurosAReceber += restante
+      }
+      // Juros fixo: valor do juro calculado sobre o emprestado, independente
+      // de ter gerado (períodos de atraso) ou sido pago
+      jurosFixos += e.valor_juros
     }
 
     return [
@@ -108,6 +114,12 @@ export function DashboardView({
         color: '#00e5cc',
       },
       {
+        label: 'Juros Fixos',
+        value: formatBRL(jurosFixos),
+        icon: <DollarSign className="w-5 h-5" />,
+        color: '#00e5cc',
+      },
+      {
         label: 'Em atraso',
         value: formatBRL(jurosEmAtraso),
         sub: `${atrasados.length} empréstimo${atrasados.length !== 1 ? 's' : ''}`,
@@ -116,7 +128,13 @@ export function DashboardView({
       },
       {
         label: 'Negociado',
-        value: formatBRL(negociados.reduce((s, e) => s + Math.max(0, e.valor_total_devido - (pagosPorEmp[e.id]?.total ?? 0)), 0)),
+        // valor_negociado é um acordo à parte: pagamentos de antes de negociar
+        // (juros/principal/atraso da fórmula antiga) não abatem — só o que foi
+        // pago como "quitação" do próprio acordo conta
+        value: formatBRL(negociados.reduce((s, e) => {
+          const pago = e.valor_negociado != null ? (pagosPorEmp[e.id]?.quitacao ?? 0) : (pagosPorEmp[e.id]?.total ?? 0)
+          return s + Math.max(0, e.valor_total_devido - pago)
+        }, 0)),
         sub: `${negociados.length} empréstimo${negociados.length !== 1 ? 's' : ''}`,
         icon: <Handshake className="w-5 h-5" />,
         color: '#8b5cf6',
@@ -167,7 +185,7 @@ export function DashboardView({
 
       {isLoading ? (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-          {Array.from({ length: 6 }).map((_, i) => (
+          {Array.from({ length: 7 }).map((_, i) => (
             <Skeleton key={i} className="h-24 rounded-2xl" style={{ background: 'var(--muted)' }} />
           ))}
         </div>
@@ -195,9 +213,12 @@ export function DashboardView({
         <div className="rounded-2xl border p-4" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
           <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--foreground)' }}>Atenção imediata</h3>
           <div className="flex flex-col gap-2">
-            {urgentes.map(e => (
-              <UrgenciaItem key={e.id} e={e} />
-            ))}
+            {urgentes.map(e => {
+              const jurosTotal = e.valor_juros * (1 + e.periodos_atraso)
+              const pagoJuros = pagosPorEmp[e.id]?.juros ?? 0
+              const jurosRestante = Math.max(0, jurosTotal - pagoJuros)
+              return <UrgenciaItem key={e.id} e={e} jurosRestante={jurosRestante} />
+            })}
           </div>
         </div>
       )}
@@ -215,7 +236,7 @@ export function DashboardView({
   )
 }
 
-function UrgenciaItem({ e }: { e: EmprestimoCalculado }) {
+function UrgenciaItem({ e, jurosRestante }: { e: EmprestimoCalculado; jurosRestante: number }) {
   return (
     <Link
       href="/emprestimos"
@@ -231,7 +252,7 @@ function UrgenciaItem({ e }: { e: EmprestimoCalculado }) {
       </div>
       <div className="text-right">
         <p className="text-sm font-bold" style={{ color: e.situacao === 'atrasado' ? 'var(--destructive)' : '#00e5cc' }}>
-          {formatBRL(e.valor_total_devido)}
+          {formatBRL(jurosRestante)}
         </p>
         <Badge
           className="text-xs mt-0.5"

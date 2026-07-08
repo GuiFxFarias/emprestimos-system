@@ -151,22 +151,28 @@ select
     else 0
   end                                                                        as valor_mora,
 
-  -- retroativo nunca é 'atrasado' — sem juros/mora não faz sentido cobrar urgência
+  -- atrasado só quando o vencimento EFETIVO (que avança a cada período de
+  -- juros pago) já passou — não o vencimento original fixo. Assim, pagar
+  -- o juros do período (e a mora do dia) tira o cliente do atraso, e a
+  -- mora não volta a contar sozinha no dia seguinte.
   case
     when e.status = 'quitado'   then 'quitado'
     when e.status = 'negociado' then 'negociado'
     when e.retroativo then 'em_dia'
-    when current_date > e.data_vencimento then 'atrasado'
+    when current_date > vef.vencimento_efetivo then 'atrasado'
     else 'em_dia'
   end                                                                        as situacao,
 
   -- Valor total devido: juros simples recorrentes a cada período vencido
   -- + mora diária do período atual (incompleto), calculado sobre data_ref
-  -- retroativo (só principal) e valor_negociado manual têm prioridade
+  -- retroativo (só principal) e valor_negociado manual têm prioridade.
+  -- valor_negociado é o valor POR PARCELA — total = valor_negociado ×
+  -- parcelas_negociado (sem parcelas_negociado = 1x, valor cheio)
   case
     when e.status = 'quitado' then 0
     when e.retroativo then e.valor_principal
-    when e.status = 'negociado' and e.valor_negociado is not null then e.valor_negociado
+    when e.status = 'negociado' and e.valor_negociado is not null
+      then round(e.valor_negociado * coalesce(e.parcelas_negociado, 1), 2)
     when ref.data_ref <= e.data_vencimento then
       round(e.valor_principal * (1 + e.taxa_juros / 100.0), 2)
     else
@@ -185,7 +191,24 @@ cross join lateral (
     when e.status = 'negociado' and e.data_negociacao is not null then e.data_negociacao
     else current_date
   end as data_ref
-) ref;
+) ref
+-- soma de tudo já pago como "juros" pra esse empréstimo
+cross join lateral (
+  select coalesce(sum(p.valor), 0) as pago_juros_total
+  from public.pagamentos p
+  where p.emprestimo_id = e.id and p.destino = 'juros'
+) pj
+-- vencimento efetivo: cada período de juros integralmente pago empurra
+-- o vencimento um prazo_dias pra frente. Com taxa 0% não há juros pra
+-- pagar/avançar período, então mantém o vencimento original.
+cross join lateral (
+  select case
+    when round(e.valor_principal * (e.taxa_juros / 100.0), 2) > 0
+      then e.data_vencimento
+        + (floor(pj.pago_juros_total / round(e.valor_principal * (e.taxa_juros / 100.0), 2))::int * e.prazo_dias)
+    else e.data_vencimento
+  end as vencimento_efetivo
+) vef;
 
 -- 6) ROW LEVEL SECURITY (RLS) --------------------------------
 alter table public.clientes      enable row level security;

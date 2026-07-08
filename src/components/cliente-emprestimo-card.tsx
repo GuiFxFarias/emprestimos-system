@@ -14,6 +14,7 @@ export interface ClienteEmprestimoStats {
   totalAtivo: number
   totalDevido: number
   totalJuros: number
+  totalJurosFixo: number
   totalNegociado: number
   temAtrasado: boolean
   temNegociado: boolean
@@ -80,9 +81,13 @@ export const ClienteEmprestimoCard = memo(function ClienteEmprestimoCard({ clien
             <span className="font-medium" style={{ color: cliente.temAtrasado ? 'var(--destructive)' : '#00e5cc' }}>
               {formatBRL(cliente.totalDevido)}
             </span>
-            {' · '}Juros:{' '}
+            {' · '}Juros a receber:{' '}
             <span className="font-medium" style={{ color: cliente.temAtrasado ? 'var(--destructive)' : '#00e5cc' }}>
               {formatBRL(cliente.totalJuros)}
+            </span>
+            {' · '}Juros Fixos:{' '}
+            <span className="font-medium" style={{ color: '#00e5cc' }}>
+              {formatBRL(cliente.totalJurosFixo)}
             </span>
             {cliente.totalNegociado > 0 && (
               <>

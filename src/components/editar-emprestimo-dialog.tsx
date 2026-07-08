@@ -286,7 +286,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
                 </div>
               )}
               <div className="flex flex-col gap-1.5">
-                <Label style={{ color: 'var(--muted-foreground)' }}>Valor negociado (R$)</Label>
+                <Label style={{ color: 'var(--muted-foreground)' }}>Valor da parcela negociada (R$)</Label>
                 <Input
                   type="number" step="0.01" min="0"
                   placeholder="Deixe em branco para usar o valor calculado"
@@ -294,7 +294,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
                   style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
                 />
                 <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                  Se preenchido, substitui o total devido calculado (use para descontos/acordos que fogem da fórmula).
+                  Se preenchido, o total devido vira este valor × quantidade de parcelas abaixo (use para descontos/acordos que fogem da fórmula).
                 </p>
               </div>
               <div className="flex flex-col gap-1.5">
@@ -306,7 +306,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
                   style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
                 />
                 <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                  Só um registro informativo de quantas parcelas foram combinadas — não gera parcelas nem muda o cálculo.
+                  Multiplica o valor da parcela acima pra formar o total devido — não gera parcelas de fato, é só o cálculo do total (1x se deixado em branco).
                 </p>
               </div>
               <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
