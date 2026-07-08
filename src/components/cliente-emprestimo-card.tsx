@@ -76,7 +76,7 @@ export const ClienteEmprestimoCard = memo(function ClienteEmprestimoCard({ clien
         </div>
         {cliente.emprestimosAtivos > 0 ? (
           <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-            Total devido:{' '}
+            Total emprestado:{' '}
             <span className="font-medium" style={{ color: cliente.temAtrasado ? 'var(--destructive)' : '#00e5cc' }}>
               {formatBRL(cliente.totalDevido)}
             </span>
