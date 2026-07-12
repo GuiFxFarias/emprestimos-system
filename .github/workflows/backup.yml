@@ -1,0 +1,70 @@
+name: Backup Supabase Database
+
+on:
+  schedule:
+    # 06:00 UTC = 03:00 America/Sao_Paulo
+    - cron: '0 6 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump database
+        run: |
+          set -euo pipefail
+          FILENAME="backup-$(date -u +%Y-%m-%dT%H-%M-%SZ).sql.gz"
+          echo "FILENAME=$FILENAME" >> "$GITHUB_ENV"
+
+          docker run --rm \
+            postgres:17 \
+            pg_dump "${{ secrets.SUPABASE_DB_URL }}" \
+              --no-owner --no-privileges --format=plain \
+            | gzip -9 > "$FILENAME"
+
+          echo "Dump size: $(du -h "$FILENAME" | cut -f1)"
+
+      - name: Upload to Supabase Storage
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -X POST "${{ secrets.SUPABASE_URL }}/storage/v1/object/backups/${FILENAME}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/gzip" \
+            --data-binary "@${FILENAME}"
+          echo "Uploaded $FILENAME"
+
+      - name: Prune backups older than 30 days
+        run: |
+          set -euo pipefail
+          # Compara pela data embutida no nome do arquivo (backup-YYYY-MM-DDTHH-MM-SSZ.sql.gz),
+          # não pelo created_at do Storage — evita problemas de parsing de timestamp com frações de segundo.
+          CUTOFF_DATE=$(date -u -d '30 days ago' +%Y-%m-%d)
+
+          curl --fail --silent --show-error \
+            -X POST "${{ secrets.SUPABASE_URL }}/storage/v1/object/list/backups" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"prefix": "", "limit": 1000, "sortBy": {"column": "name", "order": "asc"}}' \
+            > listing.json
+
+          OLD=$(jq -r --arg cutoff "$CUTOFF_DATE" '
+            .[] | .name | select(test("^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}T")) | select(.[7:17] < $cutoff)
+          ' listing.json)
+
+          if [ -z "$OLD" ]; then
+            echo "Nothing to prune."
+            exit 0
+          fi
+
+          PREFIXES=$(echo "$OLD" | jq -R . | jq -s .)
+          curl --fail --silent --show-error \
+            -X DELETE "${{ secrets.SUPABASE_URL }}/storage/v1/object/backups" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"prefixes\": $PREFIXES}"
+          echo "Pruned:"
+          echo "$OLD"

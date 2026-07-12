@@ -2,6 +2,7 @@
 
 import { memo, useState } from 'react'
 import { addDays, parseISO, format as formatDateFns } from 'date-fns'
+import { Accordion, AccordionItem, AccordionTrigger, AccordionPanel } from '@/components/ui/accordion'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -441,48 +442,57 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
       )}
 
       {/* Timeline */}
-      <div className="relative pl-5">
-        <div
-          className="absolute left-1.75 top-2 bottom-2 w-px"
-          style={{ background: 'var(--border)' }}
-        />
-        {timelineItems.map((item, idx) => {
-          const isLast = idx === timelineItems.length - 1
-          const color = dotColor(item.type)
-          const isFutureVencimento = item.type === 'vencimento' && item.date > hoje
-
-          return (
-            <div key={idx} className={`relative flex items-start gap-3 ${isLast ? '' : 'mb-3'}`}>
+      <Accordion>
+        <AccordionItem value="historico" className="border-b-0">
+          <AccordionTrigger className="py-1.5 text-xs font-semibold no-underline hover:no-underline hover:opacity-80" style={{ color: 'var(--muted-foreground)' }}>
+            Histórico ({timelineItems.length})
+          </AccordionTrigger>
+          <AccordionPanel className="pb-0">
+            <div className="relative pl-5 pt-1">
               <div
-                className="absolute -left-3.25 w-3.75 h-3.75 rounded-full flex items-center justify-center shrink-0 mt-0.5 z-10"
-                style={{
-                  background: isFutureVencimento ? 'var(--muted)' : color,
-                  border: isFutureVencimento ? `2px solid ${color}` : 'none',
-                  color: isFutureVencimento ? color : '#040d1f',
-                }}
-              >
-                <span style={{ color: isFutureVencimento ? color : '#040d1f' }}>
-                  {dotIcon(item.type)}
-                </span>
-              </div>
-              <div className="min-w-0">
-                <p
-                  className="text-xs"
-                  style={{
-                    color: isLast && ((atrasado && !emAberto) || venceHoje) ? 'var(--destructive)' : isLast && quitado ? '#00e5cc' : 'var(--foreground)',
-                    fontWeight: isLast ? 600 : 400,
-                  }}
-                >
-                  {item.label}
-                </p>
-                <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-                  {formatDate(item.date)}
-                </p>
-              </div>
+                className="absolute left-1.75 top-2 bottom-2 w-px"
+                style={{ background: 'var(--border)' }}
+              />
+              {timelineItems.map((item, idx) => {
+                const isLast = idx === timelineItems.length - 1
+                const color = dotColor(item.type)
+                const isFutureVencimento = item.type === 'vencimento' && item.date > hoje
+
+                return (
+                  <div key={idx} className={`relative flex items-start gap-3 ${isLast ? '' : 'mb-3'}`}>
+                    <div
+                      className="absolute -left-3.25 w-3.75 h-3.75 rounded-full flex items-center justify-center shrink-0 mt-0.5 z-10"
+                      style={{
+                        background: isFutureVencimento ? 'var(--muted)' : color,
+                        border: isFutureVencimento ? `2px solid ${color}` : 'none',
+                        color: isFutureVencimento ? color : '#040d1f',
+                      }}
+                    >
+                      <span style={{ color: isFutureVencimento ? color : '#040d1f' }}>
+                        {dotIcon(item.type)}
+                      </span>
+                    </div>
+                    <div className="min-w-0">
+                      <p
+                        className="text-xs"
+                        style={{
+                          color: isLast && ((atrasado && !emAberto) || venceHoje) ? 'var(--destructive)' : isLast && quitado ? '#00e5cc' : 'var(--foreground)',
+                          fontWeight: isLast ? 600 : 400,
+                        }}
+                      >
+                        {item.label}
+                      </p>
+                      <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                        {formatDate(item.date)}
+                      </p>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-          )
-        })}
-      </div>
+          </AccordionPanel>
+        </AccordionItem>
+      </Accordion>
 
       {/* Anotações */}
       <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border)' }}>

@@ -13,6 +13,7 @@ import {
   type PagamentoResumo,
 } from '@/lib/queries'
 import { createClient } from '@/lib/supabase/client'
+import { formatBRL } from '@/lib/format'
 import { toast } from 'sonner'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
@@ -441,6 +442,9 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
                   {emprestimos.filter(e => e.status === 'ativo').length > 0 && (
                     <> · {emprestimos.filter(e => e.status === 'ativo').length} ativo{emprestimos.filter(e => e.status === 'ativo').length !== 1 ? 's' : ''}</>
                   )}
+                </p>
+                <p className="text-xs font-medium" style={{ color: 'var(--color-warning)' }}>
+                  Total emprestado {formatBRL(emprestimos.reduce((s, e) => s + e.valor_principal, 0))}
                 </p>
               </div>
             </>

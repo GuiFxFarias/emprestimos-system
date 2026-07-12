@@ -34,7 +34,7 @@ export function Sidebar() {
 
   return (
     <aside
-      className='hidden md:flex flex-col w-60 min-h-screen border-r'
+      className='hidden md:flex flex-col w-60 h-screen sticky top-0 border-r'
       style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
     >
       <div

@@ -82,6 +82,15 @@ create table if not exists public.pagamentos (
   created_at     timestamptz not null default now()
 );
 
+-- 3.5 Anotações de empréstimo
+create table if not exists public.anotacoes_emprestimo (
+  id             uuid primary key default uuid_generate_v4(),
+  owner_id       uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  emprestimo_id  uuid not null references public.emprestimos(id) on delete cascade,
+  texto          text not null check (char_length(trim(texto)) > 0),
+  created_at     timestamptz not null default now()
+);
+
 -- 4) ÍNDICES --------------------------------------------------
 create index if not exists idx_clientes_owner     on public.clientes(owner_id);
 create index if not exists idx_emprestimos_owner   on public.emprestimos(owner_id);
@@ -89,6 +98,8 @@ create index if not exists idx_emprestimos_cliente on public.emprestimos(cliente
 create index if not exists idx_emprestimos_status  on public.emprestimos(status);
 create index if not exists idx_pagamentos_owner    on public.pagamentos(owner_id);
 create index if not exists idx_pagamentos_emp      on public.pagamentos(emprestimo_id);
+create index if not exists idx_anotacoes_owner     on public.anotacoes_emprestimo(owner_id);
+create index if not exists idx_anotacoes_emp       on public.anotacoes_emprestimo(emprestimo_id);
 
 -- 5) VIEW DE CÁLCULO -----------------------------------------
 -- 'negociado' com data_negociacao preenchida congela juros/mora/atraso
@@ -215,6 +226,7 @@ alter table public.clientes      enable row level security;
 alter table public.configuracoes enable row level security;
 alter table public.emprestimos   enable row level security;
 alter table public.pagamentos    enable row level security;
+alter table public.anotacoes_emprestimo enable row level security;
 
 create policy "clientes_select_own" on public.clientes for select using (owner_id = auth.uid());
 create policy "clientes_insert_own" on public.clientes for insert with check (owner_id = auth.uid());
@@ -233,6 +245,10 @@ create policy "emp_delete_own" on public.emprestimos for delete using (owner_id 
 create policy "pag_select_own" on public.pagamentos for select using (owner_id = auth.uid());
 create policy "pag_insert_own" on public.pagamentos for insert with check (owner_id = auth.uid());
 create policy "pag_delete_own" on public.pagamentos for delete using (owner_id = auth.uid());
+
+create policy "anot_select_own" on public.anotacoes_emprestimo for select using (owner_id = auth.uid());
+create policy "anot_insert_own" on public.anotacoes_emprestimo for insert with check (owner_id = auth.uid());
+create policy "anot_delete_own" on public.anotacoes_emprestimo for delete using (owner_id = auth.uid());
 
 -- 7) TRIGGERS -------------------------------------------------
 
@@ -300,6 +316,13 @@ create policy "fotos_delete_own" on storage.objects
     bucket_id = 'fotos-clientes'
     and auth.uid()::text = (storage.foldername(name))[1]
   );
+
+-- Bucket privado para dumps de backup do banco (gravado só pela service role,
+-- via GitHub Actions — sem policies aqui de propósito: nenhum usuário comum
+-- deve ler/escrever, só a service role, que sempre ignora RLS).
+insert into storage.buckets (id, name, public)
+values ('backups', 'backups', false)
+on conflict (id) do nothing;
 
 -- =============================================================
 -- FIM DO SCHEMA
