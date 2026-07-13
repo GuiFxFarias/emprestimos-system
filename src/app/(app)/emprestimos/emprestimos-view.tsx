@@ -444,7 +444,12 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
                   )}
                 </p>
                 <p className="text-xs font-medium" style={{ color: 'var(--color-warning)' }}>
-                  Total emprestado {formatBRL(emprestimos.reduce((s, e) => s + e.valor_principal, 0))}
+                  Total pago {formatBRL(
+                    Object.values(pagamentosPorEmp).reduce(
+                      (s, pagtos) => s + pagtos.reduce((sp, p) => sp + p.valor, 0),
+                      0
+                    )
+                  )}
                 </p>
               </div>
             </>
