@@ -139,9 +139,14 @@ select
        else round(e.valor_principal * (1 + e.taxa_juros / 100.0), 2)
   end                                                                        as valor_no_vencimento,
 
+  -- Dias de atraso do período ATUAL (reseta a cada prazo_dias vencido —
+  -- mesma lógica já usada pela mora em R$ logo abaixo). Sem o módulo, um
+  -- empréstimo vencido há vários meses acumulava todos os dias desde o
+  -- primeiro vencimento (ex: "33 dias de atraso" em vez de "3 dias" no
+  -- vencimento mensal mais próximo).
   case
     when e.status = 'quitado' or e.retroativo then 0
-    when ref.data_ref > e.data_vencimento then (ref.data_ref - e.data_vencimento)
+    when ref.data_ref > e.data_vencimento then (ref.data_ref - e.data_vencimento) % e.prazo_dias
     else 0
   end                                                                        as dias_atraso,
 

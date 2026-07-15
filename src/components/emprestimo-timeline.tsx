@@ -377,7 +377,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
                 {e.valor_mora > 0 && (
                   <div className="flex items-center gap-1.5">
                     <span style={{ color: 'var(--muted-foreground)' }}>
-                      Mora ({(e.dias_atraso % e.prazo_dias)}d × {formatBRL(e.juros_mora_diario_reais)}/d)
+                      Mora ({e.dias_atraso}d × {formatBRL(e.juros_mora_diario_reais)}/d)
                     </span>
                     <span style={{ color: 'var(--destructive)' }}>+ {formatBRL(e.valor_mora)}</span>
                   </div>
