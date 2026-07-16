@@ -17,7 +17,8 @@ import {
 } from '@/components/ui/dialog'
 import { Loader2 } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { formatBRL } from '@/lib/format'
+import { addDays, parseISO } from 'date-fns'
+import { formatBRL, formatDate } from '@/lib/format'
 import type { EmprestimoCalculado, Pagamento } from '@/lib/types'
 
 type Destino = 'atraso' | 'juros' | 'principal' | 'quitacao'
@@ -46,6 +47,9 @@ interface Restantes {
   pagoAtraso: number
   pagoPrincipal: number
   negociadoComValor: boolean
+  // true quando o período atual de juros já está quitado (nada vencido agora),
+  // mas ainda é possível adiantar o próximo período antes do vencimento chegar
+  jurosAntecipado: boolean
 }
 
 // Empréstimo negociado com valor manual (valor_negociado × parcelas_negociado)
@@ -73,6 +77,7 @@ export function calcularRestantes(emp: EmprestimoCalculado, pagamentos: Pagament
       pagoAtraso,
       pagoPrincipal,
       negociadoComValor: true,
+      jurosAntecipado: false,
     }
   }
 
@@ -84,6 +89,10 @@ export function calcularRestantes(emp: EmprestimoCalculado, pagamentos: Pagament
   // de juros quando só 1800 é devido) não abate o que falta nas outras
   const total = Math.round((principal + juros + atraso) * 100) / 100
 
+  // período atual já quitado (juros === 0): ainda dá pra adiantar o próximo
+  // período antes dele vencer, então a opção "Juros" continua disponível
+  const jurosAntecipado = emp.status !== 'quitado' && emp.valor_juros > 0 && juros === 0
+
   return {
     principal,
     juros,
@@ -93,6 +102,7 @@ export function calcularRestantes(emp: EmprestimoCalculado, pagamentos: Pagament
     pagoAtraso,
     pagoPrincipal,
     negociadoComValor: false,
+    jurosAntecipado,
   }
 }
 
@@ -137,10 +147,12 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
     ? emprestimo.valor_negociado * (emprestimo.parcelas_negociado ?? 1)
     : 0
 
+  const valorJurosPeriodo = emprestimo.valor_juros
+
   function getRestante(d: Destino): number {
     switch (d) {
       case 'atraso': return r.atraso
-      case 'juros': return r.juros
+      case 'juros': return r.juros > 0 ? r.juros : (r.jurosAntecipado ? valorJurosPeriodo : 0)
       case 'principal': return r.principal
       case 'quitacao': return r.total
     }
@@ -148,6 +160,17 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
 
   const maxValor = getRestante(destino)
   const valorAtual = form.watch('valor')
+
+  // preview do adiantamento: mesma conta da view emprestimos_calculados
+  // (vencimento_efetivo) — só avança se este pagamento completar um período
+  // inteiro de juros que ainda não tinha sido pago
+  const periodosJaPagos = emprestimo.valor_juros > 0 ? Math.floor(r.pagoJuros / emprestimo.valor_juros) : 0
+  const periodosComEstePagamento = emprestimo.valor_juros > 0
+    ? Math.floor((r.pagoJuros + (destino === 'juros' ? (valorAtual || 0) : 0)) / emprestimo.valor_juros)
+    : 0
+  const novoVencimento = destino === 'juros' && r.jurosAntecipado && periodosComEstePagamento > periodosJaPagos
+    ? addDays(parseISO(emprestimo.data_vencimento), periodosComEstePagamento * emprestimo.prazo_dias)
+    : null
   // Negociado com valor: só existe a opção "quitação" (pagamento avulso contra
   // o acordo) — só considera "quitar o empréstimo" quando o valor cobre o
   // restante inteiro, senão é só mais uma parcela paga.
@@ -240,7 +263,11 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
                 items={[
                   { value: 'quitacao', label: `Quitação total — ${formatBRL(r.total)}` },
                   ...(r.principal > 0 ? [{ value: 'principal', label: `Principal (dívida) — ${formatBRL(r.principal)}` }] : []),
-                  ...(r.juros > 0 ? [{ value: 'juros', label: `Juros — ${formatBRL(r.juros)}` }] : []),
+                  ...(r.juros > 0
+                    ? [{ value: 'juros', label: `Juros — ${formatBRL(r.juros)}` }]
+                    : r.jurosAntecipado
+                      ? [{ value: 'juros', label: `Juros (adiantar próximo período) — ${formatBRL(emprestimo.valor_juros)}` }]
+                      : []),
                   ...(temAtraso && r.atraso > 0 ? [{ value: 'atraso', label: `Mora / Atraso (${emprestimo.dias_atraso} dia${emprestimo.dias_atraso > 1 ? 's' : ''}) — ${formatBRL(r.atraso)}` }] : []),
                 ]}
                 value={destino}
@@ -257,6 +284,11 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
                   {r.juros > 0 && (
                     <SelectItem value="juros">Juros — {formatBRL(r.juros)}</SelectItem>
                   )}
+                  {r.juros === 0 && r.jurosAntecipado && (
+                    <SelectItem value="juros">
+                      Juros (adiantar próximo período) — {formatBRL(emprestimo.valor_juros)}
+                    </SelectItem>
+                  )}
                   {temAtraso && r.atraso > 0 && (
                     <SelectItem value="atraso">
                       Mora / Atraso ({emprestimo.dias_atraso} dia{emprestimo.dias_atraso > 1 ? 's' : ''}) — {formatBRL(r.atraso)}
@@ -264,6 +296,18 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
                   )}
                 </SelectContent>
               </Select>
+            </div>
+          )}
+
+          {destino === 'juros' && r.jurosAntecipado && (
+            <div
+              className="rounded-lg p-2.5 text-xs border"
+              style={{ background: 'rgba(0,198,255,0.08)', borderColor: 'rgba(0,198,255,0.25)', color: '#00c6ff' }}
+            >
+              Pagamento antecipado — não há juros vencido no momento, este valor adianta o próximo período.
+              {novoVencimento && (
+                <> O vencimento passa para <strong>{formatDate(novoVencimento)}</strong>.</>
+              )}
             </div>
           )}
 

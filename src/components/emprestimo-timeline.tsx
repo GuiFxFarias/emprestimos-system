@@ -1,7 +1,7 @@
 'use client'
 
 import { memo, useState } from 'react'
-import { addDays, parseISO, format as formatDateFns } from 'date-fns'
+import { addDays, differenceInCalendarDays, parseISO, format as formatDateFns } from 'date-fns'
 import { Accordion, AccordionItem, AccordionTrigger, AccordionPanel } from '@/components/ui/accordion'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,11 +26,11 @@ interface Props {
   hoje: string
 }
 
-function labelDestino(destino: string | null, tipo: string): string {
+function labelDestino(destino: string | null, tipo: string, antecipado?: boolean): string {
   switch (destino) {
     case 'quitacao':  return tipo === 'quitacao' ? 'Quitação' : 'Pagamento (negociado)'
     case 'principal': return 'Pagamento — Principal'
-    case 'juros':     return 'Pagamento — Juros'
+    case 'juros':     return antecipado ? 'Pagamento — Juros (adiantamento)' : 'Pagamento — Juros'
     case 'atraso':    return 'Pagamento — Mora'
     default:          return tipo === 'quitacao' ? 'Quitação' : 'Pagamento parcial'
   }
@@ -77,6 +77,28 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
   const jurosPago = jurosTotal <= 0.005 || pagoJuros >= jurosTotal - 0.005
 
   const pagoPrincipal = pagamentos.filter(p => p.destino === 'principal').reduce((s, p) => s + p.valor, 0)
+
+  // marca quais pagamentos de juros foram adiantamentos: refaz a conta de
+  // "quanto era devido na data" (mesma fórmula de periodos_atraso da view
+  // emprestimos_calculados) na ordem em que os pagamentos aconteceram — se
+  // nada ainda era devido antes dele, o pagamento é um adiantamento
+  const jurosAntecipadoIds = new Set<string>()
+  if (e.valor_juros > 0) {
+    const jurosPagamentos = [...pagamentos]
+      .filter(p => p.destino === 'juros')
+      .sort((a, b) => a.data_pagamento.localeCompare(b.data_pagamento) || a.created_at.localeCompare(b.created_at))
+
+    let pagoAcumulado = 0
+    for (const p of jurosPagamentos) {
+      const diasDesdeVencimento = differenceInCalendarDays(parseISO(p.data_pagamento), parseISO(e.data_vencimento))
+      const periodosAtrasoNaData = diasDesdeVencimento <= 0 ? 0 : Math.floor(diasDesdeVencimento / e.prazo_dias)
+      const devidoNaData = e.valor_juros * (1 + periodosAtrasoNaData)
+      if (pagoAcumulado >= devidoNaData - 0.005) {
+        jurosAntecipadoIds.add(p.id)
+      }
+      pagoAcumulado += p.valor
+    }
+  }
 
   // Atrasado mas com juros e mora do período em dia: não é mais "atrasado", é "em aberto"
   // (só falta o principal — deixa de gerar urgência até vencer um novo período)
@@ -128,7 +150,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     },
     ...pagamentos.map(p => ({
       date: p.data_pagamento,
-      label: `${labelDestino(p.destino, p.tipo)} — ${formatBRL(p.valor)}`,
+      label: `${labelDestino(p.destino, p.tipo, jurosAntecipadoIds.has(p.id))} — ${formatBRL(p.valor)}`,
       value: p.valor,
       type: (p.tipo === 'quitacao' ? 'quitado' : 'pagamento') as TimelineItem['type'],
     })),
