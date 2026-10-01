@@ -6,6 +6,9 @@ on:
     - cron: '0 6 * * *'
   workflow_dispatch: {}
 
+permissions:
+  actions: write
+
 jobs:
   backup:
     runs-on: ubuntu-latest
@@ -68,3 +71,10 @@ jobs:
             -d "{\"prefixes\": $PREFIXES}"
           echo "Pruned:"
           echo "$OLD"
+
+      - name: Keepalive
+        # O GitHub desativa workflows agendados após 60 dias sem commits no repo.
+        # Reativar via API a cada execução zera esse contador.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/backup.yml/enable"
