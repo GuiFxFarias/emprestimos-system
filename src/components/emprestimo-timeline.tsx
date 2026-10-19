@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { AlertCircle, CheckCircle2, Clock, CreditCard, TrendingUp, Pencil, MessageSquarePlus, Trash2, Loader2 } from 'lucide-react'
 import { formatBRL, formatDate } from '@/lib/format'
+import { composicaoNegociado } from '@/lib/recebimentos'
 import type { EmprestimoCalculado, Pagamento, AnotacaoEmprestimo } from '@/lib/types'
 
 function addDiasToDataString(dateStr: string, dias: number): string {
@@ -114,6 +115,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
   const pagoNegociado = pagamentos
     .filter(p => p.destino === 'quitacao')
     .reduce((s, p) => s + p.valor, 0)
+  const composicao = composicaoNegociado(e, pagamentos)
 
   // Restante por categoria (capado em 0): pagar a mais numa categoria (ex.: 3000
   // de juros quando só 1800 é devido) não pode abater o que falta nas outras.
@@ -371,12 +373,26 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
         <div className="mb-4 rounded-xl overflow-hidden text-xs" style={{ background: 'var(--muted)' }}>
           <div className="px-3 py-2.5 flex flex-col gap-1.5">
             {negociadoComValor ? (
-              <div className="flex items-center gap-1.5">
-                <span style={{ color: 'var(--muted-foreground)' }}>
-                  Valor negociado{e.parcelas_negociado ? ` (${e.parcelas_negociado}x)` : ''}
-                </span>
-                <span style={{ color: '#8b5cf6', fontWeight: 500 }}>{formatBRL(e.valor_negociado ?? 0)}</span>
-              </div>
+              <>
+                <div className="flex items-center gap-1.5">
+                  <span style={{ color: 'var(--muted-foreground)' }}>
+                    Valor negociado{e.parcelas_negociado ? ` (${e.parcelas_negociado}x)` : ''}
+                  </span>
+                  <span style={{ color: '#8b5cf6', fontWeight: 500 }}>{formatBRL(e.valor_negociado ?? 0)}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span style={{ color: 'var(--muted-foreground)' }}>Valor emprestado</span>
+                  <span style={{ color: 'var(--foreground)', fontWeight: 500 }}>{formatBRL(composicao.capital)}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span style={{ color: 'var(--muted-foreground)' }}>Juros do acordo</span>
+                  <span style={{ color: 'var(--primary)' }}>+ {formatBRL(composicao.juros)}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span style={{ color: 'var(--muted-foreground)' }}>Total negociado</span>
+                  <span style={{ color: '#8b5cf6', fontWeight: 500 }}>{formatBRL(composicao.total)}</span>
+                </div>
+              </>
             ) : retroativo ? (
               <div className="flex items-center gap-1.5">
                 <span style={{ color: 'var(--muted-foreground)' }}>Principal (retroativo, sem juros/mora)</span>

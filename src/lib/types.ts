@@ -98,3 +98,26 @@ export interface AnotacaoEmprestimo {
   texto: string
   created_at: string
 }
+
+export type ChequeStatus = 'a_compensar' | 'compensado' | 'devolvido'
+
+export interface Cheque {
+  id: string
+  owner_id: string
+  cliente_id: string
+  valor: number
+  taxa_juros: number
+  data_entrada: string
+  data_vencimento: string
+  banco: string | null
+  numero: string | null
+  status: ChequeStatus
+  data_compensacao: string | null
+  observacoes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ChequeComCliente extends Cheque {
+  cliente: { nome: string; telefone: string | null } | null
+}

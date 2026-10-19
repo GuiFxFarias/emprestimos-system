@@ -3,12 +3,22 @@
 import { useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import { useQuery } from '@tanstack/react-query'
-import { queryKeys, fetchEmprestimosCalculados, fetchAllPagamentos, type PagamentoResumo } from '@/lib/queries'
+import { queryKeys, fetchEmprestimosCalculados, fetchAllPagamentos, fetchCheques, type PagamentoResumo } from '@/lib/queries'
 import { formatBRL, formatDate } from '@/lib/format'
+import { composicaoNegociado, separarRecebido } from '@/lib/recebimentos'
+import {
+  hojeLocal,
+  jurosCheque,
+  entregueCheque,
+  diasParaVencer,
+  situacaoCheque,
+  SITUACAO_CHEQUE_INFO,
+  type SituacaoCheque,
+} from '@/lib/cheques'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { MetricCard } from '@/components/metric-card'
-import { format, parseISO } from 'date-fns'
+import { addDays, format, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import {
   TrendingUp,
@@ -18,8 +28,10 @@ import {
   DollarSign,
   Calendar,
   Handshake,
+  PiggyBank,
+  Receipt,
 } from 'lucide-react'
-import type { EmprestimoCalculado } from '@/lib/types'
+import type { EmprestimoCalculado, ChequeComCliente } from '@/lib/types'
 import Link from 'next/link'
 
 const DonutChart = dynamic(
@@ -35,10 +47,14 @@ const BarChartMensal = dynamic(
 export function DashboardView({
   initialEmprestimos,
   initialPagamentos,
+  initialCheques,
 }: {
   initialEmprestimos: EmprestimoCalculado[]
   initialPagamentos: PagamentoResumo[]
+  initialCheques: ChequeComCliente[]
 }) {
+  const hoje = hojeLocal()
+
   const { data: emprestimos = [], isLoading } = useQuery({
     queryKey: queryKeys.emprestimosCalculados(),
     queryFn: fetchEmprestimosCalculados,
@@ -50,6 +66,14 @@ export function DashboardView({
     queryFn: fetchAllPagamentos,
     initialData: initialPagamentos,
   })
+
+  const { data: cheques = [] } = useQuery({
+    queryKey: queryKeys.cheques(),
+    queryFn: fetchCheques,
+    initialData: initialCheques,
+  })
+
+  const chequesAbertos = useMemo(() => cheques.filter(c => c.status !== 'compensado'), [cheques])
 
   const { ativos, quitados, atrasados, negociados } = useMemo(() => ({
     ativos: emprestimos.filter(e => e.status === 'ativo' || e.status === 'negociado'),
@@ -70,8 +94,55 @@ export function DashboardView({
     return map
   }, [pagamentos])
 
+  const pagamentosPorEmp = useMemo(() => {
+    const map: Record<string, PagamentoResumo[]> = {}
+    for (const p of pagamentos) (map[p.emprestimo_id] ??= []).push(p)
+    return map
+  }, [pagamentos])
+
   const metrics = useMemo(() => {
-    const totalRecebido = pagamentos.reduce((s, p) => s + p.valor, 0)
+    // Recebido separado em juros (lucro) e capital (volta pro caixa):
+    // pagamentos dos empréstimos + cheques já compensados
+    let recebidoJuros = 0
+    let recebidoCapital = 0
+    for (const e of emprestimos) {
+      const r = separarRecebido(e, pagamentosPorEmp[e.id] ?? [])
+      recebidoJuros += r.juros
+      recebidoCapital += r.capital
+    }
+    for (const c of cheques) {
+      if (c.status !== 'compensado') continue
+      recebidoJuros += jurosCheque(c)
+      recebidoCapital += entregueCheque(c)
+    }
+
+    // Negociado: o que falta receber + composição (capital × juros) dos acordos
+    let negCapital = 0
+    let negJuros = 0
+    let negPago = 0
+    let negRestante = 0
+    for (const e of negociados) {
+      const pags = pagamentosPorEmp[e.id] ?? []
+      if (e.valor_negociado != null) {
+        // acordo à parte: só o que foi pago como "quitação" do acordo abate
+        const comp = composicaoNegociado(e, pags)
+        const pago = pagosPorEmp[e.id]?.quitacao ?? 0
+        negCapital += comp.capital
+        negJuros += comp.juros
+        negPago += pago
+        negRestante += Math.max(0, comp.total - pago)
+      } else {
+        const pago = pagosPorEmp[e.id]?.total ?? 0
+        negCapital += e.valor_principal
+        negJuros += Math.max(0, e.valor_total_devido - e.valor_principal)
+        negPago += pago
+        negRestante += Math.max(0, e.valor_total_devido - pago)
+      }
+    }
+
+    const chequesCapital = chequesAbertos.reduce((s, c) => s + entregueCheque(c), 0)
+    const chequesJuros = chequesAbertos.reduce((s, c) => s + jurosCheque(c), 0)
+    const chequesUrgentes = chequesAbertos.filter(c => SITUACAO_CHEQUE_INFO[situacaoCheque(c, hoje)].urgente).length
 
     // Juros ainda não pagos: vai pra "a receber" enquanto o empréstimo está
     // em dia (ainda não venceu), e pra "em atraso" assim que a situação
@@ -128,25 +199,49 @@ export function DashboardView({
       },
       {
         label: 'Negociado',
-        // valor_negociado é um acordo à parte: pagamentos de antes de negociar
-        // (juros/principal/atraso da fórmula antiga) não abatem — só o que foi
-        // pago como "quitação" do próprio acordo conta
-        value: formatBRL(negociados.reduce((s, e) => {
-          const pago = e.valor_negociado != null ? (pagosPorEmp[e.id]?.quitacao ?? 0) : (pagosPorEmp[e.id]?.total ?? 0)
-          return s + Math.max(0, e.valor_total_devido - pago)
-        }, 0)),
-        sub: `${negociados.length} empréstimo${negociados.length !== 1 ? 's' : ''}`,
+        value: formatBRL(negRestante),
+        details: negociados.length > 0
+          ? [
+              { label: 'Valor emprestado', value: formatBRL(negCapital) },
+              { label: 'Juros', value: formatBRL(negJuros) },
+              { label: 'Total negociado', value: formatBRL(negCapital + negJuros) },
+              ...(negPago > 0 ? [{ label: 'Já pago', value: `− ${formatBRL(negPago)}` }] : []),
+            ]
+          : undefined,
+        sub: `falta receber · ${negociados.length} empréstimo${negociados.length !== 1 ? 's' : ''}`,
         icon: <Handshake className="w-5 h-5" />,
         color: '#8b5cf6',
       },
       {
-        label: 'Total recebido',
-        value: formatBRL(totalRecebido),
+        label: 'Juros recebidos (lucro)',
+        value: formatBRL(recebidoJuros),
+        sub: `de ${formatBRL(recebidoJuros + recebidoCapital)} recebidos no total`,
         icon: <CheckCircle2 className="w-5 h-5" />,
         color: '#00e5cc',
       },
+      {
+        label: 'Capital devolvido ao caixa',
+        value: formatBRL(recebidoCapital),
+        sub: 'valor emprestado que já voltou',
+        icon: <PiggyBank className="w-5 h-5" />,
+        color: 'var(--primary)',
+      },
+      {
+        label: 'Cheques a compensar',
+        value: formatBRL(chequesCapital + chequesJuros),
+        details: chequesAbertos.length > 0
+          ? [
+              { label: 'Valor entregue', value: formatBRL(chequesCapital) },
+              { label: 'Juros', value: formatBRL(chequesJuros) },
+            ]
+          : undefined,
+        sub: `${chequesAbertos.length} cheque${chequesAbertos.length !== 1 ? 's' : ''}`
+          + (chequesUrgentes > 0 ? ` · ${chequesUrgentes} precisa${chequesUrgentes !== 1 ? 'm' : ''} de atenção` : ''),
+        icon: <Receipt className="w-5 h-5" />,
+        color: chequesUrgentes > 0 ? 'var(--destructive)' : 'var(--primary)',
+      },
     ]
-  }, [ativos, atrasados, negociados, pagamentos, pagosPorEmp])
+  }, [emprestimos, ativos, atrasados, negociados, cheques, chequesAbertos, hoje, pagosPorEmp, pagamentosPorEmp])
 
   const donutData = useMemo(() => [
     { name: 'Em dia', value: ativos.filter(e => e.situacao === 'em_dia').length, color: 'var(--primary)' },
@@ -165,16 +260,35 @@ export function DashboardView({
   }, [emprestimos])
 
   const urgentes = useMemo(() => {
-    const hoje = new Date().toISOString().slice(0, 10)
-    const em7dias = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    const em7dias = format(addDays(parseISO(hoje), 7), 'yyyy-MM-dd')
     const proxVencimentos = ativos
       .filter(e => e.situacao === 'em_dia' && e.data_vencimento >= hoje && e.data_vencimento <= em7dias)
       .sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento))
-    return [
-      ...atrasados.sort((a, b) => b.dias_atraso - a.dias_atraso),
-      ...proxVencimentos,
-    ].slice(0, 8)
-  }, [ativos, atrasados])
+    // cheque só entra aqui perto do vencimento (ou vencido/devolvido) —
+    // antes disso não gera alerta nenhum
+    const chequesAlerta = chequesAbertos
+      .map(c => ({ c, situacao: situacaoCheque(c, hoje) }))
+      .filter(x => SITUACAO_CHEQUE_INFO[x.situacao].urgente)
+    const chequesCriticos = chequesAlerta
+      .filter(x => x.situacao !== 'vence_em_breve')
+      .sort((a, b) => a.c.data_vencimento.localeCompare(b.c.data_vencimento))
+
+    type Item = { kind: 'emp'; e: EmprestimoCalculado } | { kind: 'cheque'; c: ChequeComCliente; situacao: SituacaoCheque }
+    const proximos: Item[] = [
+      ...proxVencimentos.map(e => ({ kind: 'emp' as const, e })),
+      ...chequesAlerta.filter(x => x.situacao === 'vence_em_breve').map(x => ({ kind: 'cheque' as const, ...x })),
+    ].sort((a, b) =>
+      (a.kind === 'emp' ? a.e.data_vencimento : a.c.data_vencimento)
+        .localeCompare(b.kind === 'emp' ? b.e.data_vencimento : b.c.data_vencimento)
+    )
+
+    const itens: Item[] = [
+      ...atrasados.sort((a, b) => b.dias_atraso - a.dias_atraso).map(e => ({ kind: 'emp' as const, e })),
+      ...chequesCriticos.map(x => ({ kind: 'cheque' as const, ...x })),
+      ...proximos,
+    ]
+    return itens.slice(0, 10)
+  }, [ativos, atrasados, chequesAbertos, hoje])
 
   return (
     <div className="p-4 md:p-8">
@@ -185,7 +299,7 @@ export function DashboardView({
 
       {isLoading ? (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-          {Array.from({ length: 7 }).map((_, i) => (
+          {Array.from({ length: 9 }).map((_, i) => (
             <Skeleton key={i} className="h-24 rounded-2xl" style={{ background: 'var(--muted)' }} />
           ))}
         </div>
@@ -213,7 +327,11 @@ export function DashboardView({
         <div className="rounded-2xl border p-4" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
           <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--foreground)' }}>Atenção imediata</h3>
           <div className="flex flex-col gap-2">
-            {urgentes.map(e => {
+            {urgentes.map(item => {
+              if (item.kind === 'cheque') {
+                return <ChequeUrgenciaItem key={`cheque-${item.c.id}`} c={item.c} situacao={item.situacao} hoje={hoje} />
+              }
+              const e = item.e
               const jurosTotal = e.valor_juros * (1 + e.periodos_atraso)
               const pagoJuros = pagosPorEmp[e.id]?.juros ?? 0
               const jurosRestante = Math.max(0, jurosTotal - pagoJuros)
@@ -223,7 +341,7 @@ export function DashboardView({
         </div>
       )}
 
-      {!isLoading && emprestimos.length === 0 && (
+      {!isLoading && emprestimos.length === 0 && cheques.length === 0 && (
         <div className="flex flex-col items-center justify-center py-20 gap-3">
           <TrendingUp className="w-12 h-12" style={{ color: 'var(--muted-foreground)' }} />
           <p style={{ color: 'var(--muted-foreground)' }}>Nenhum dado ainda</p>
@@ -263,6 +381,43 @@ function UrgenciaItem({ e, jurosRestante }: { e: EmprestimoCalculado; jurosResta
           }}
         >
           {e.situacao === 'atrasado' ? 'Atrasado' : 'Vence em breve'}
+        </Badge>
+      </div>
+    </Link>
+  )
+}
+
+function ChequeUrgenciaItem({ c, situacao, hoje }: { c: ChequeComCliente; situacao: SituacaoCheque; hoje: string }) {
+  const info = SITUACAO_CHEQUE_INFO[situacao]
+  const dias = diasParaVencer(c, hoje)
+  const quando = situacao === 'devolvido'
+    ? `Cheque devolvido · venceu ${formatDate(c.data_vencimento)}`
+    : dias < 0
+    ? `Cheque vencido há ${-dias}d`
+    : dias === 0
+    ? 'Cheque vence hoje'
+    : `Cheque vence ${formatDate(c.data_vencimento)}`
+
+  return (
+    <Link
+      href="/cheques"
+      className="flex items-center justify-between rounded-xl px-3 py-2.5 transition-all duration-150 hover:brightness-125 active:scale-[0.99]"
+      style={{ background: 'var(--muted)' }}
+    >
+      <div>
+        <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>{c.cliente?.nome ?? 'Cheque'}</p>
+        <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+          <Receipt className="w-3 h-3 inline mr-1" />
+          {quando}
+        </p>
+      </div>
+      <div className="text-right">
+        <p className="text-sm font-bold" style={{ color: info.color }}>{formatBRL(c.valor)}</p>
+        <Badge
+          className="text-xs mt-0.5"
+          style={{ background: `color-mix(in srgb, ${info.color} 15%, transparent)`, color: info.color, border: 'none' }}
+        >
+          {info.label}
         </Badge>
       </div>
     </Link>

@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/client'
-import type { EmprestimoCalculado, Cliente, Configuracoes, Pagamento, AnotacaoEmprestimo, PagamentoDestino } from '@/lib/types'
+import type { EmprestimoCalculado, Cliente, Configuracoes, Pagamento, AnotacaoEmprestimo, PagamentoDestino, ChequeComCliente } from '@/lib/types'
 
 // ── Query Keys ────────────────────────────────────────────────
 export const queryKeys = {
@@ -8,7 +8,11 @@ export const queryKeys = {
   clientes: () => ['clientes'] as const,
   configuracoes: () => ['configuracoes'] as const,
   pagamentos: () => ['pagamentos'] as const,
+  cheques: () => ['cheques'] as const,
 }
+
+// nome do cliente vem junto via FK cheques.cliente_id → clientes
+export const CHEQUES_SELECT = '*, cliente:clientes(nome, telefone)'
 
 // ── Client-side fetchers ───────────────────────────────────────
 export async function fetchEmprestimosCalculados(): Promise<EmprestimoCalculado[]> {
@@ -34,6 +38,12 @@ export async function fetchAllPagamentos(): Promise<PagamentoResumo[]> {
   const supabase = createClient()
   const { data } = await supabase.from('pagamentos').select('id, emprestimo_id, valor, destino')
   return (data ?? []) as PagamentoResumo[]
+}
+
+export async function fetchCheques(): Promise<ChequeComCliente[]> {
+  const supabase = createClient()
+  const { data } = await supabase.from('cheques').select(CHEQUES_SELECT).order('data_vencimento')
+  return (data ?? []) as ChequeComCliente[]
 }
 
 export async function fetchConfiguracoes(): Promise<Configuracoes | null> {

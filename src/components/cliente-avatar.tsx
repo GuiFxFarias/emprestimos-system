@@ -12,15 +12,17 @@ interface Props {
 }
 
 export function ClienteAvatar({ fotoPath, nome, size = 40, className = '' }: Props) {
-  const [src, setSrc] = useState<string | null>(null)
+  // guarda a URL junto com o path de origem: se o path mudar, a URL antiga é ignorada
+  const [signed, setSigned] = useState<{ path: string; url: string } | null>(null)
+  const src = fotoPath && signed?.path === fotoPath ? signed.url : null
 
   useEffect(() => {
-    if (!fotoPath) { setSrc(null); return }
+    if (!fotoPath) return
     const supabase = createClient()
     supabase.storage
       .from('fotos-clientes')
       .createSignedUrl(fotoPath, 3600 * 24)
-      .then(({ data }) => { if (data) setSrc(data.signedUrl) })
+      .then(({ data }) => { if (data) setSigned({ path: fotoPath, url: data.signedUrl }) })
   }, [fotoPath])
 
   const initials = nome

@@ -7,6 +7,7 @@ import {
   Users,
   HandCoins,
   Settings,
+  Receipt,
   TrendingUp,
   LogOut,
 } from 'lucide-react';
@@ -17,6 +18,7 @@ const links = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/clientes', label: 'Clientes', icon: Users },
   { href: '/emprestimos', label: 'Empréstimos', icon: HandCoins },
+  { href: '/cheques', label: 'Cheques', icon: Receipt },
   { href: '/configuracoes', label: 'Configurações', icon: Settings },
 ];
 

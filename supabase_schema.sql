@@ -91,6 +91,27 @@ create table if not exists public.anotacoes_emprestimo (
   created_at     timestamptz not null default now()
 );
 
+-- 3.6 Cheques (troca de cheque): 'valor' é o valor do cheque, recebido na
+-- data_vencimento; os juros (taxa_juros %) são descontados na troca — o
+-- cliente recebe valor − juros. Juros fixos, sem renovação nem mora
+create table if not exists public.cheques (
+  id                uuid primary key default uuid_generate_v4(),
+  owner_id          uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  cliente_id        uuid not null references public.clientes(id) on delete restrict,
+  valor             numeric(14,2) not null check (valor > 0),
+  taxa_juros        numeric(6,3)  not null default 0 check (taxa_juros >= 0),
+  data_entrada      date not null default current_date,
+  data_vencimento   date not null,
+  banco             text,
+  numero            text,
+  status            text not null default 'a_compensar'
+                      check (status in ('a_compensar', 'compensado', 'devolvido')),
+  data_compensacao  date,
+  observacoes       text,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+
 -- 4) ÍNDICES --------------------------------------------------
 create index if not exists idx_clientes_owner     on public.clientes(owner_id);
 create index if not exists idx_emprestimos_owner   on public.emprestimos(owner_id);
@@ -100,6 +121,9 @@ create index if not exists idx_pagamentos_owner    on public.pagamentos(owner_id
 create index if not exists idx_pagamentos_emp      on public.pagamentos(emprestimo_id);
 create index if not exists idx_anotacoes_owner     on public.anotacoes_emprestimo(owner_id);
 create index if not exists idx_anotacoes_emp       on public.anotacoes_emprestimo(emprestimo_id);
+create index if not exists idx_cheques_owner       on public.cheques(owner_id);
+create index if not exists idx_cheques_cliente     on public.cheques(cliente_id);
+create index if not exists idx_cheques_vencimento  on public.cheques(data_vencimento);
 
 -- 5) VIEW DE CÁLCULO -----------------------------------------
 -- 'negociado' com data_negociacao preenchida congela juros/mora/atraso
@@ -232,6 +256,7 @@ alter table public.configuracoes enable row level security;
 alter table public.emprestimos   enable row level security;
 alter table public.pagamentos    enable row level security;
 alter table public.anotacoes_emprestimo enable row level security;
+alter table public.cheques       enable row level security;
 
 create policy "clientes_select_own" on public.clientes for select using (owner_id = auth.uid());
 create policy "clientes_insert_own" on public.clientes for insert with check (owner_id = auth.uid());
@@ -255,6 +280,11 @@ create policy "anot_select_own" on public.anotacoes_emprestimo for select using 
 create policy "anot_insert_own" on public.anotacoes_emprestimo for insert with check (owner_id = auth.uid());
 create policy "anot_delete_own" on public.anotacoes_emprestimo for delete using (owner_id = auth.uid());
 
+create policy "cheq_select_own" on public.cheques for select using (owner_id = auth.uid());
+create policy "cheq_insert_own" on public.cheques for insert with check (owner_id = auth.uid());
+create policy "cheq_update_own" on public.cheques for update using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+create policy "cheq_delete_own" on public.cheques for delete using (owner_id = auth.uid());
+
 -- 7) TRIGGERS -------------------------------------------------
 
 create or replace function public.set_updated_at()
@@ -274,6 +304,10 @@ create trigger trg_config_updated before update on public.configuracoes
 
 drop trigger if exists trg_emprestimos_updated on public.emprestimos;
 create trigger trg_emprestimos_updated before update on public.emprestimos
+  for each row execute function public.set_updated_at();
+
+drop trigger if exists trg_cheques_updated on public.cheques;
+create trigger trg_cheques_updated before update on public.cheques
   for each row execute function public.set_updated_at();
 
 create or replace function public.handle_new_user()
