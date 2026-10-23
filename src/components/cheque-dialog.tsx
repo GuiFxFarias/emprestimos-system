@@ -44,7 +44,7 @@ function somarDias(data: string, dias: number): string {
   return format(addDays(parseISO(data), dias), 'yyyy-MM-dd')
 }
 
-function valoresIniciais(cheque: Cheque | null): ChequeFormValues {
+function valoresIniciais(cheque: Cheque | null, defaultClienteId?: string): ChequeFormValues {
   if (cheque) {
     return {
       cliente_id: cheque.cliente_id,
@@ -59,7 +59,7 @@ function valoresIniciais(cheque: Cheque | null): ChequeFormValues {
   }
   const hoje = hojeLocal()
   return {
-    cliente_id: '',
+    cliente_id: defaultClienteId ?? '',
     valor: undefined as unknown as number,
     taxa_juros: 0,
     data_entrada: hoje,
@@ -78,17 +78,19 @@ interface Props {
   onClose: () => void
   onSubmit: (values: ChequeFormValues) => Promise<void>
   saving: boolean
+  // pré-seleciona o cliente ao cadastrar de dentro da tela dele
+  defaultClienteId?: string
 }
 
-export function ChequeDialog({ open, cheque, clientes, onClose, onSubmit, saving }: Props) {
+export function ChequeDialog({ open, cheque, clientes, onClose, onSubmit, saving, defaultClienteId }: Props) {
   const form = useForm<ChequeFormValues>({
     resolver: zodResolver(schema),
-    defaultValues: valoresIniciais(cheque),
+    defaultValues: valoresIniciais(cheque, defaultClienteId),
   })
 
   useEffect(() => {
-    if (open) form.reset(valoresIniciais(cheque))
-  }, [open, cheque?.id])
+    if (open) form.reset(valoresIniciais(cheque, defaultClienteId))
+  }, [open, cheque?.id, defaultClienteId])
 
   const watched = form.watch()
   const valor = Number(watched.valor) || 0

@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { MetricCard } from '@/components/metric-card'
 import { ChequeDialog, CompensarChequeDialog, type ChequeFormValues } from '@/components/cheque-dialog'
+import { ClienteChequeCard, type ClienteChequeStats } from '@/components/cliente-cheque-card'
+import { ClienteAvatar } from '@/components/cliente-avatar'
 import {
   hojeLocal,
   jurosCheque,
@@ -19,8 +21,10 @@ import {
   situacaoCheque,
   SITUACAO_CHEQUE_INFO,
   DIAS_ALERTA_CHEQUE,
+  type SituacaoCheque,
 } from '@/lib/cheques'
 import {
+  ArrowLeft,
   Receipt,
   Plus,
   Search,
@@ -38,6 +42,9 @@ import type { Cheque, ChequeComCliente, ChequeStatus, Cliente } from '@/lib/type
 
 type Filtro = 'abertos' | 'compensados' | 'todos'
 
+// da mais urgente pra menos — define a ordem dos clientes na lista
+const PRIORIDADE_SITUACAO: SituacaoCheque[] = ['devolvido', 'vencido', 'vence_hoje', 'vence_em_breve', 'aguardando']
+
 interface Props {
   initialCheques: ChequeComCliente[]
   initialClientes: Cliente[]
@@ -48,6 +55,7 @@ export function ChequesView({ initialCheques, initialClientes }: Props) {
   const hoje = hojeLocal()
 
   const [search, setSearch] = useState('')
+  const [selectedClienteId, setSelectedClienteId] = useState<string | null>(null)
   const [filtro, setFiltro] = useState<Filtro>('abertos')
   const [dialogAberto, setDialogAberto] = useState(false)
   const [editando, setEditando] = useState<Cheque | null>(null)
@@ -74,27 +82,81 @@ export function ChequesView({ initialCheques, initialClientes }: Props) {
     return { capital, juros, urgentes }
   }, [abertos, hoje])
 
+  const chequesPorCliente = useMemo(() => {
+    const map: Record<string, ChequeComCliente[]> = {}
+    for (const c of cheques) (map[c.cliente_id] ??= []).push(c)
+    return map
+  }, [cheques])
+
+  // Só entram na lista clientes que já trocaram cheque; os com cheque
+  // urgente (devolvido/vencido/vencendo) sobem pro topo
+  const clienteStats = useMemo((): ClienteChequeStats[] => {
+    const stats = clientes
+      .filter(cl => chequesPorCliente[cl.id]?.length)
+      .map(cl => {
+        const doCliente = chequesPorCliente[cl.id]
+        const abertosCl = doCliente.filter(c => c.status !== 'compensado')
+        let pior: SituacaoCheque | null = null
+        for (const c of abertosCl) {
+          const s = situacaoCheque(c, hoje)
+          if (pior === null || PRIORIDADE_SITUACAO.indexOf(s) < PRIORIDADE_SITUACAO.indexOf(pior)) pior = s
+        }
+        return {
+          id: cl.id,
+          nome: cl.nome,
+          telefone: cl.telefone,
+          foto_url: cl.foto_url,
+          aReceber: abertosCl.reduce((s, c) => s + c.valor, 0),
+          juros: abertosCl.reduce((s, c) => s + jurosCheque(c), 0),
+          entregue: abertosCl.reduce((s, c) => s + entregueCheque(c), 0),
+          abertos: abertosCl.length,
+          compensados: doCliente.length - abertosCl.length,
+          pior,
+        }
+      })
+    const rank = (c: ClienteChequeStats) =>
+      c.pior === null ? PRIORIDADE_SITUACAO.length : PRIORIDADE_SITUACAO.indexOf(c.pior)
+    return stats.sort((a, b) => rank(a) - rank(b))
+  }, [clientes, chequesPorCliente, hoje])
+
+  const filteredClientes = useMemo(() => {
+    const termo = search.trim().toLowerCase()
+    if (!termo) return clienteStats
+    return clienteStats.filter(cl =>
+      cl.nome.toLowerCase().includes(termo) ||
+      (cl.telefone ?? '').includes(termo) ||
+      chequesPorCliente[cl.id].some(c =>
+        (c.banco ?? '').toLowerCase().includes(termo) ||
+        (c.numero ?? '').toLowerCase().includes(termo)
+      )
+    )
+  }, [clienteStats, chequesPorCliente, search])
+
+  const selectedCliente = selectedClienteId ? clientes.find(c => c.id === selectedClienteId) : null
+  const doCliente = useMemo(
+    () => (selectedClienteId ? chequesPorCliente[selectedClienteId] ?? [] : []),
+    [chequesPorCliente, selectedClienteId]
+  )
+  const abertosCliente = useMemo(() => doCliente.filter(c => c.status !== 'compensado'), [doCliente])
+
   const lista = useMemo(() => {
     const base = filtro === 'abertos'
-      ? abertos
+      ? abertosCliente
       : filtro === 'compensados'
-      ? cheques.filter(c => c.status === 'compensado')
-      : cheques
-    const termo = search.trim().toLowerCase()
-    const filtrada = termo
-      ? base.filter(c =>
-          (c.cliente?.nome ?? '').toLowerCase().includes(termo) ||
-          (c.banco ?? '').toLowerCase().includes(termo) ||
-          (c.numero ?? '').toLowerCase().includes(termo)
-        )
-      : base
+      ? doCliente.filter(c => c.status === 'compensado')
+      : doCliente
     // compensados: mais recentes primeiro; abertos: vencimento mais próximo primeiro
-    return [...filtrada].sort((a, b) =>
+    return [...base].sort((a, b) =>
       filtro === 'compensados'
         ? (b.data_compensacao ?? b.data_vencimento).localeCompare(a.data_compensacao ?? a.data_vencimento)
         : a.data_vencimento.localeCompare(b.data_vencimento)
     )
-  }, [cheques, abertos, filtro, search])
+  }, [doCliente, abertosCliente, filtro])
+
+  function abrirCliente(cl: ClienteChequeStats) {
+    setFiltro(cl.abertos > 0 ? 'abertos' : 'todos')
+    setSelectedClienteId(cl.id)
+  }
 
   function invalidate() {
     queryClient.invalidateQueries({ queryKey: queryKeys.cheques() })
@@ -173,56 +235,74 @@ export function ChequesView({ initialCheques, initialClientes }: Props) {
     setEditando(null)
   }
 
-  const filtros: { value: Filtro; label: string; count: number }[] = [
-    { value: 'abertos', label: 'Em aberto', count: abertos.length },
-    { value: 'compensados', label: 'Compensados', count: cheques.length - abertos.length },
-    { value: 'todos', label: 'Todos', count: cheques.length },
-  ]
+  const dialogs = (
+    <>
+      <ChequeDialog
+        open={dialogAberto}
+        cheque={editando}
+        clientes={clientes}
+        onClose={fecharDialog}
+        onSubmit={async v => { salvarMutation.mutate(v) }}
+        saving={salvarMutation.isPending}
+        defaultClienteId={selectedClienteId ?? undefined}
+      />
 
-  return (
-    <div className="p-4 md:p-8">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <Receipt className="w-6 h-6" style={{ color: 'var(--primary)' }} />
-          <h1 className="text-xl font-bold" style={{ color: 'var(--foreground)' }}>Cheques</h1>
+      <CompensarChequeDialog
+        cheque={compensando}
+        onClose={() => setCompensando(null)}
+        onConfirm={async data => {
+          if (compensando) statusMutation.mutate({ id: compensando.id, status: 'compensado', data_compensacao: data })
+        }}
+        saving={statusMutation.isPending}
+      />
+    </>
+  )
+
+  // ── CLIENT LIST VIEW ──────────────────────────────────────────
+  if (!selectedClienteId) {
+    return (
+      <div className="p-4 md:p-8">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <Receipt className="w-6 h-6" style={{ color: 'var(--primary)' }} />
+            <h1 className="text-xl font-bold" style={{ color: 'var(--foreground)' }}>Cheques</h1>
+          </div>
+          <Button
+            onClick={abrirNovo}
+            size="sm"
+            className="gap-2 font-semibold"
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+          >
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">Novo cheque</span>
+          </Button>
         </div>
-        <Button
-          onClick={abrirNovo}
-          size="sm"
-          className="gap-2 font-semibold"
-          style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
-        >
-          <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">Novo cheque</span>
-        </Button>
-      </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-        <MetricCard
-          label="A receber (em aberto)"
-          value={formatBRL(resumo.capital + resumo.juros)}
-          sub={`${abertos.length} cheque${abertos.length !== 1 ? 's' : ''}`}
-          icon={<Wallet className="w-5 h-5" />}
-          color="var(--primary)"
-        />
-        <MetricCard
-          label="Juros a receber"
-          value={formatBRL(resumo.juros)}
-          sub={`sobre ${formatBRL(resumo.capital)} entregues`}
-          icon={<DollarSign className="w-5 h-5" />}
-          color="#00e5cc"
-        />
-        <MetricCard
-          label="Precisam de atenção"
-          value={String(resumo.urgentes)}
-          sub={`vencidos, devolvidos ou vencendo em ${DIAS_ALERTA_CHEQUE} dias`}
-          icon={<AlertCircle className="w-5 h-5" />}
-          color={resumo.urgentes > 0 ? 'var(--destructive)' : 'var(--muted-foreground)'}
-        />
-      </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+          <MetricCard
+            label="A receber (em aberto)"
+            value={formatBRL(resumo.capital + resumo.juros)}
+            sub={`${abertos.length} cheque${abertos.length !== 1 ? 's' : ''}`}
+            icon={<Wallet className="w-5 h-5" />}
+            color="var(--primary)"
+          />
+          <MetricCard
+            label="Juros a receber"
+            value={formatBRL(resumo.juros)}
+            sub={`sobre ${formatBRL(resumo.capital)} entregues`}
+            icon={<DollarSign className="w-5 h-5" />}
+            color="#00e5cc"
+          />
+          <MetricCard
+            label="Precisam de atenção"
+            value={String(resumo.urgentes)}
+            sub={`vencidos, devolvidos ou vencendo em ${DIAS_ALERTA_CHEQUE} dias`}
+            icon={<AlertCircle className="w-5 h-5" />}
+            color={resumo.urgentes > 0 ? 'var(--destructive)' : 'var(--muted-foreground)'}
+          />
+        </div>
 
-      <div className="flex flex-col sm:flex-row gap-3 mb-4">
-        <div className="relative flex-1">
+        <div className="relative mb-4">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--muted-foreground)' }} />
           <Input
             placeholder="Buscar por cliente, banco ou nº..."
@@ -232,29 +312,109 @@ export function ChequesView({ initialCheques, initialClientes }: Props) {
             style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
           />
         </div>
-        <div className="flex rounded-xl p-1 gap-1" style={{ background: 'var(--muted)' }}>
-          {filtros.map(f => (
-            <button
-              key={f.value}
-              type="button"
-              onClick={() => setFiltro(f.value)}
-              className={`flex-1 sm:flex-none text-xs px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
-                filtro === f.value ? 'font-semibold text-primary bg-primary/10' : 'text-muted-foreground hover:text-primary'
-              }`}
-            >
-              {f.label} ({f.count})
-            </button>
-          ))}
+
+        {filteredClientes.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-3">
+            <Receipt className="w-12 h-12" style={{ color: 'var(--muted-foreground)' }} />
+            <p style={{ color: 'var(--muted-foreground)' }}>
+              {search ? 'Nenhum cliente encontrado' : 'Nenhum cheque cadastrado'}
+            </p>
+            {!search && (
+              <Button
+                onClick={abrirNovo}
+                variant="outline" size="sm"
+                style={{ borderColor: 'var(--border)', color: 'var(--foreground)' }}
+              >
+                Cadastrar cheque
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {filteredClientes.map(cl => (
+              <ClienteChequeCard key={cl.id} cliente={cl} onClick={() => abrirCliente(cl)} />
+            ))}
+          </div>
+        )}
+
+        {dialogs}
+      </div>
+    )
+  }
+
+  // ── CLIENT CHEQUES VIEW ───────────────────────────────────────
+  const filtros: { value: Filtro; label: string; count: number }[] = [
+    { value: 'abertos', label: 'Em aberto', count: abertosCliente.length },
+    { value: 'compensados', label: 'Compensados', count: doCliente.length - abertosCliente.length },
+    { value: 'todos', label: 'Todos', count: doCliente.length },
+  ]
+  const aReceberCliente = abertosCliente.reduce((s, c) => s + c.valor, 0)
+
+  return (
+    <div className="p-4 md:p-8">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3 min-w-0">
+          <Button
+            variant="ghost" size="icon"
+            onClick={() => setSelectedClienteId(null)}
+            className="shrink-0"
+            style={{ color: 'var(--muted-foreground)' }}
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
+          {selectedCliente && (
+            <>
+              <ClienteAvatar fotoPath={selectedCliente.foto_url} nome={selectedCliente.nome} size={36} />
+              <div className="min-w-0">
+                <h1 className="text-lg font-bold truncate" style={{ color: 'var(--foreground)' }}>
+                  {selectedCliente.nome}
+                </h1>
+                <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  {doCliente.length} cheque{doCliente.length !== 1 ? 's' : ''}
+                  {abertosCliente.length > 0 && <> · {abertosCliente.length} em aberto</>}
+                </p>
+                {abertosCliente.length > 0 && (
+                  <p className="text-xs font-medium" style={{ color: '#00e5cc' }}>
+                    A receber {formatBRL(aReceberCliente)}
+                  </p>
+                )}
+              </div>
+            </>
+          )}
         </div>
+        <Button
+          onClick={abrirNovo}
+          size="sm"
+          className="gap-2 font-semibold shrink-0"
+          style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+        >
+          <Plus className="w-4 h-4" />
+          <span className="hidden sm:inline">Novo cheque</span>
+        </Button>
+      </div>
+
+      <div className="flex rounded-xl p-1 gap-1 mb-4 sm:w-fit" style={{ background: 'var(--muted)' }}>
+        {filtros.map(f => (
+          <button
+            key={f.value}
+            type="button"
+            onClick={() => setFiltro(f.value)}
+            className={`flex-1 sm:flex-none text-xs px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
+              filtro === f.value ? 'font-semibold text-primary bg-primary/10' : 'text-muted-foreground hover:text-primary'
+            }`}
+          >
+            {f.label} ({f.count})
+          </button>
+        ))}
       </div>
 
       {lista.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 gap-3">
           <Receipt className="w-12 h-12" style={{ color: 'var(--muted-foreground)' }} />
           <p style={{ color: 'var(--muted-foreground)' }}>
-            {search ? 'Nenhum cheque encontrado' : filtro === 'compensados' ? 'Nenhum cheque compensado ainda' : 'Nenhum cheque em aberto'}
+            {filtro === 'compensados' ? 'Nenhum cheque compensado ainda' : filtro === 'abertos' ? 'Nenhum cheque em aberto' : 'Nenhum cheque para este cliente'}
           </p>
-          {!search && filtro !== 'compensados' && (
+          {filtro !== 'compensados' && (
             <Button
               onClick={abrirNovo}
               variant="outline" size="sm"
@@ -282,23 +442,7 @@ export function ChequesView({ initialCheques, initialClientes }: Props) {
         </div>
       )}
 
-      <ChequeDialog
-        open={dialogAberto}
-        cheque={editando}
-        clientes={clientes}
-        onClose={fecharDialog}
-        onSubmit={async v => { salvarMutation.mutate(v) }}
-        saving={salvarMutation.isPending}
-      />
-
-      <CompensarChequeDialog
-        cheque={compensando}
-        onClose={() => setCompensando(null)}
-        onConfirm={async data => {
-          if (compensando) statusMutation.mutate({ id: compensando.id, status: 'compensado', data_compensacao: data })
-        }}
-        saving={statusMutation.isPending}
-      />
+      {dialogs}
     </div>
   )
 }
@@ -354,11 +498,10 @@ function ChequeCard({ cheque: c, hoje, busy, onEdit, onDelete, onCompensar, onDe
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-semibold text-sm truncate" style={{ color: 'var(--foreground)' }}>
-            {c.cliente?.nome ?? 'Cliente removido'}
+            {[c.banco, c.numero && `nº ${c.numero}`].filter(Boolean).join(' · ') || 'Cheque'}
           </p>
           <p className="text-xs" style={mutedStyle}>
-            {[c.banco, c.numero && `nº ${c.numero}`].filter(Boolean).join(' · ') || 'Cheque'}
-            {' · '}trocado em {formatDate(c.data_entrada)}
+            Trocado em {formatDate(c.data_entrada)}
           </p>
         </div>
         <Badge
