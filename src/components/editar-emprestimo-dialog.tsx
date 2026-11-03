@@ -38,6 +38,7 @@ const schema = z.object({
   data_negociacao: z.string().optional(),
   valor_negociado: z.number().min(0).optional(),
   parcelas_negociado: z.number().int().min(1).optional(),
+  data_primeira_parcela: z.string().optional(),
   ja_quitado: z.boolean().optional(),
 })
 
@@ -75,6 +76,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
       data_negociacao: '',
       valor_negociado: undefined,
       parcelas_negociado: undefined,
+      data_primeira_parcela: '',
       ja_quitado: false,
     },
   })
@@ -95,6 +97,7 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
         data_negociacao: emprestimo.data_negociacao ?? '',
         valor_negociado: emprestimo.valor_negociado ?? undefined,
         parcelas_negociado: emprestimo.parcelas_negociado ?? undefined,
+        data_primeira_parcela: emprestimo.data_primeira_parcela ?? '',
         ja_quitado: false,
       })
     }
@@ -306,7 +309,18 @@ export function EditarEmprestimoDialog({ emprestimo, onClose, onSubmit, saving }
                   style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
                 />
                 <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                  Multiplica o valor da parcela acima pra formar o total devido — não gera parcelas de fato, é só o cálculo do total (1x se deixado em branco).
+                  Multiplica o valor da parcela acima pra formar o total devido (1x se deixado em branco).
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label style={{ color: 'var(--muted-foreground)' }}>Vencimento da 1ª parcela</Label>
+                <Input
+                  type="date"
+                  {...form.register('data_primeira_parcela')}
+                  style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
+                />
+                <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  As próximas vencem todo mês no mesmo dia. No dia do vencimento (ou depois, se não pago) o empréstimo fica em vermelho e aparece no dashboard.
                 </p>
               </div>
               <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>

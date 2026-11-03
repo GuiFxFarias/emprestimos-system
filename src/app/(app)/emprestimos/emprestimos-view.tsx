@@ -25,9 +25,12 @@ import { PagamentoDialog, type PagamentoFormValues, calcularRestantes } from '@/
 import { EditarEmprestimoDialog, type EditEmprestimoFormValues } from '@/components/editar-emprestimo-dialog'
 import { ClienteAvatar } from '@/components/cliente-avatar'
 import { HandCoins, Plus, ArrowLeft, Search } from 'lucide-react'
+import { hojeLocal } from '@/lib/cheques'
+import { proximaParcelaNegociado } from '@/lib/negociado'
 import type { EmprestimoCalculado, Cliente, Configuracoes, AnotacaoEmprestimo } from '@/lib/types'
 
-const HOJE = new Date().toISOString().slice(0, 10)
+// data local (toISOString é UTC — depois das 21h já seria "amanhã")
+const HOJE = hojeLocal()
 
 interface Props {
   initialClientes: Cliente[]
@@ -92,6 +95,12 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
     return map
   }, [pagamentos])
 
+  const listaPagamentosPorEmp = useMemo(() => {
+    const map: Record<string, PagamentoResumo[]> = {}
+    for (const p of pagamentos) (map[p.emprestimo_id] ??= []).push(p)
+    return map
+  }, [pagamentos])
+
   const clienteStats = useMemo((): ClienteEmprestimoStats[] => {
     const statsMap: Record<string, { totalAtivo: number; totalDevido: number; totalJuros: number; totalJurosFixo: number; totalNegociado: number; temAtrasado: boolean; temNegociado: boolean; temVenceHoje: boolean; ativos: number }> = {}
 
@@ -119,6 +128,10 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
         // de antes de negociar não contam mais aqui
         const pagoNegociado = e.valor_negociado != null ? pago.quitacao : pago.total
         statsMap[e.cliente_id].totalNegociado += Math.max(0, e.valor_total_devido - pagoNegociado)
+        // parcela do acordo vencendo hoje / vencida também precisa avisar
+        const parcela = proximaParcelaNegociado(e, listaPagamentosPorEmp[e.id] ?? [], HOJE)
+        if (parcela?.situacao === 'atrasada') statsMap[e.cliente_id].temAtrasado = true
+        if (parcela?.situacao === 'vence_hoje') statsMap[e.cliente_id].temVenceHoje = true
       }
     }
 
@@ -137,7 +150,7 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
       temVenceHoje: statsMap[c.id]?.temVenceHoje ?? false,
       emprestimosAtivos: statsMap[c.id]?.ativos ?? 0,
     }))
-  }, [clientes, allEmprestimos, pagosPorEmp])
+  }, [clientes, allEmprestimos, pagosPorEmp, listaPagamentosPorEmp])
 
   const filteredClientes = useMemo(() =>
     clienteStats.filter(c =>
@@ -271,6 +284,7 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
         data_negociacao: !values.ja_quitado && values.status === 'negociado' && values.congelar_negociacao ? (values.data_negociacao || null) : null,
         valor_negociado: !values.ja_quitado && values.status === 'negociado' ? (values.valor_negociado ?? null) : null,
         parcelas_negociado: !values.ja_quitado && values.status === 'negociado' ? (values.parcelas_negociado ?? null) : null,
+        data_primeira_parcela: !values.ja_quitado && values.status === 'negociado' ? (values.data_primeira_parcela || null) : null,
       }).eq('id', editandoEmp.id)
       if (error) throw new Error(error.message)
     },
@@ -410,8 +424,9 @@ export function EmprestimosView({ initialClientes, initialEmprestimos, initialCo
 
   const sorted = [...emprestimos].sort((a, b) => {
     const priority = (e: EmprestimoCalculado) => {
-      if (e.situacao === 'atrasado') return 0
-      if (e.situacao === 'em_dia' && e.data_vencimento === HOJE) return 1
+      const parcela = proximaParcelaNegociado(e, pagamentosPorEmp[e.id] ?? [], HOJE)
+      if (e.situacao === 'atrasado' || parcela?.situacao === 'atrasada') return 0
+      if ((e.situacao === 'em_dia' && e.data_vencimento === HOJE) || parcela?.situacao === 'vence_hoje') return 1
       if (e.situacao === 'em_dia') return 2
       return 3
     }

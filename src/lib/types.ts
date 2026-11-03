@@ -42,6 +42,7 @@ export interface Emprestimo {
   data_negociacao: string | null
   valor_negociado: number | null
   parcelas_negociado: number | null
+  data_primeira_parcela: string | null
   retroativo: boolean
   observacoes: string | null
   created_at: string
@@ -66,6 +67,7 @@ export interface EmprestimoCalculado {
   data_negociacao: string | null
   valor_negociado: number | null
   parcelas_negociado: number | null
+  data_primeira_parcela: string | null
   retroativo: boolean
   observacoes: string | null
   created_at: string

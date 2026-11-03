@@ -19,9 +19,14 @@ import { Loader2 } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { addDays, parseISO } from 'date-fns'
 import { formatBRL, formatDate } from '@/lib/format'
+import { hojeLocal } from '@/lib/cheques'
+import { parcelaAtualNegociado, proximaParcelaNegociado } from '@/lib/negociado'
 import type { EmprestimoCalculado, Pagamento } from '@/lib/types'
 
 type Destino = 'atraso' | 'juros' | 'principal' | 'quitacao'
+// acordo negociado: as duas opções gravam destino 'quitacao' — só muda o
+// valor sugerido (uma parcela ou o restante inteiro do acordo)
+type OpcaoNegociado = 'parcela' | 'total'
 
 const schema = z.object({
   destino: z.enum(['atraso', 'juros', 'principal', 'quitacao']),
@@ -116,13 +121,14 @@ interface Props {
 
 export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, saving }: Props) {
   const [destino, setDestino] = useState<Destino>('quitacao')
+  const [opcaoNegociado, setOpcaoNegociado] = useState<OpcaoNegociado>('parcela')
 
   const form = useForm<PagamentoFormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
       destino: 'quitacao',
       valor: emprestimo?.valor_total_devido ?? 0,
-      data_pagamento: new Date().toISOString().slice(0, 10),
+      data_pagamento: hojeLocal(),
       observacoes: '',
     },
   })
@@ -130,11 +136,15 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
   useEffect(() => {
     if (!emprestimo) return
     const r = calcularRestantes(emprestimo, pagamentos)
+    const parcela = r.negociadoComValor ? parcelaAtualNegociado(emprestimo, pagamentos) : null
+    // acordo em parcelas: já abre sugerindo a parcela, não o total
+    const sugereParcela = !!parcela && parcela.valor < r.total - 0.005
     setDestino('quitacao')
+    setOpcaoNegociado(sugereParcela ? 'parcela' : 'total')
     form.reset({
       destino: 'quitacao',
-      valor: r.total,
-      data_pagamento: new Date().toISOString().slice(0, 10),
+      valor: sugereParcela ? parcela!.valor : r.total,
+      data_pagamento: hojeLocal(),
       observacoes: '',
     })
   }, [emprestimo?.id])
@@ -142,6 +152,10 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
   if (!emprestimo) return null
 
   const r = calcularRestantes(emprestimo, pagamentos)
+  const parcelaAtual = r.negociadoComValor ? parcelaAtualNegociado(emprestimo, pagamentos) : null
+  const proximaParcela = r.negociadoComValor ? proximaParcelaNegociado(emprestimo, pagamentos, hojeLocal()) : null
+  // só faz sentido oferecer "parcela" quando ela é menor que o restante
+  const temOpcaoParcela = !!parcelaAtual && parcelaAtual.valor < r.total - 0.005
   const jurosTotal = Number((emprestimo.valor_juros * (1 + emprestimo.periodos_atraso)).toFixed(2))
   const totalNegociado = emprestimo.valor_negociado != null
     ? emprestimo.valor_negociado * (emprestimo.parcelas_negociado ?? 1)
@@ -158,7 +172,9 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
     }
   }
 
-  const maxValor = getRestante(destino)
+  const maxValor = r.negociadoComValor
+    ? (opcaoNegociado === 'parcela' && temOpcaoParcela ? parcelaAtual!.valor : r.total)
+    : getRestante(destino)
   const valorAtual = form.watch('valor')
 
   // preview do adiantamento: mesma conta da view emprestimos_calculados
@@ -186,6 +202,12 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
     form.clearErrors('valor')
   }
 
+  function handleOpcaoNegociadoChange(opcao: OpcaoNegociado) {
+    setOpcaoNegociado(opcao)
+    form.setValue('valor', opcao === 'parcela' && parcelaAtual ? parcelaAtual.valor : r.total)
+    form.clearErrors('valor')
+  }
+
   const rowStyle = { color: 'var(--muted-foreground)' }
   const inputStyle = { background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }
 
@@ -204,12 +226,29 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
           <div className="flex flex-col gap-1">
 
             {r.negociadoComValor ? (
-              <div className="flex justify-between text-sm">
-                <span style={{ color: 'var(--muted-foreground)' }}>
-                  Valor negociado{emprestimo.parcelas_negociado ? ` (${emprestimo.parcelas_negociado}x)` : ''}
-                </span>
-                <span style={{ color: '#8b5cf6', fontWeight: 500 }}>{formatBRL(totalNegociado)}</span>
-              </div>
+              <>
+                <div className="flex justify-between text-sm">
+                  <span style={{ color: 'var(--muted-foreground)' }}>
+                    Valor negociado{emprestimo.parcelas_negociado ? ` (${emprestimo.parcelas_negociado}x de ${formatBRL(emprestimo.valor_negociado ?? 0)})` : ''}
+                  </span>
+                  <span style={{ color: '#8b5cf6', fontWeight: 500 }}>{formatBRL(totalNegociado)}</span>
+                </div>
+                {totalNegociado - r.total > 0.005 && (
+                  <div className="flex justify-between text-sm">
+                    <span style={{ color: 'var(--muted-foreground)' }}>Já pago</span>
+                    <span style={{ color: '#00e5cc' }}>− {formatBRL(totalNegociado - r.total)}</span>
+                  </div>
+                )}
+                {parcelaAtual && parcelaAtual.total > 1 && (
+                  <div className="flex justify-between text-sm">
+                    <span style={{ color: 'var(--muted-foreground)' }}>
+                      Parcela em aberto ({parcelaAtual.numero}/{parcelaAtual.total})
+                      {proximaParcela && ` · vence ${formatDate(proximaParcela.data)}`}
+                    </span>
+                    <span style={{ color: 'var(--foreground)' }}>{formatBRL(parcelaAtual.valor)}</span>
+                  </div>
+                )}
+              </>
             ) : (
               <>
                 <BreakdownRow
@@ -256,6 +295,30 @@ export function PagamentoDialog({ emprestimo, pagamentos, onClose, onSubmit, sav
         </div>
 
         <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-4">
+          {r.negociadoComValor && temOpcaoParcela && (
+            <div className="flex flex-col gap-1.5">
+              <Label style={rowStyle}>O que o cliente está pagando</Label>
+              <Select
+                items={[
+                  { value: 'parcela', label: `Parcela ${parcelaAtual!.numero}/${parcelaAtual!.total} — ${formatBRL(parcelaAtual!.valor)}` },
+                  { value: 'total', label: `Quitação total do acordo — ${formatBRL(r.total)}` },
+                ]}
+                value={opcaoNegociado}
+                onValueChange={v => handleOpcaoNegociadoChange(v as OpcaoNegociado)}
+              >
+                <SelectTrigger className="w-full" style={inputStyle}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="parcela">
+                    Parcela {parcelaAtual!.numero}/{parcelaAtual!.total} — {formatBRL(parcelaAtual!.valor)}
+                  </SelectItem>
+                  <SelectItem value="total">Quitação total do acordo — {formatBRL(r.total)}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           {!r.negociadoComValor && (
             <div className="flex flex-col gap-1.5">
               <Label style={rowStyle}>Destinação do pagamento</Label>

@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { queryKeys, fetchEmprestimosCalculados, fetchAllPagamentos, fetchCheques, type PagamentoResumo } from '@/lib/queries'
 import { formatBRL, formatDate } from '@/lib/format'
 import { composicaoNegociado, separarRecebido } from '@/lib/recebimentos'
+import { proximaParcelaNegociado, type ProximaParcela } from '@/lib/negociado'
 import {
   hojeLocal,
   jurosCheque,
@@ -273,22 +274,33 @@ export function DashboardView({
       .filter(x => x.situacao !== 'vence_em_breve')
       .sort((a, b) => a.c.data_vencimento.localeCompare(b.c.data_vencimento))
 
-    type Item = { kind: 'emp'; e: EmprestimoCalculado } | { kind: 'cheque'; c: ChequeComCliente; situacao: SituacaoCheque }
+    // parcelas de acordos negociados: vencidas, vencendo hoje ou nos próximos 7 dias
+    const parcelas = negociados
+      .map(e => ({ e, p: proximaParcelaNegociado(e, pagamentosPorEmp[e.id] ?? [], hoje) }))
+      .filter((x): x is { e: EmprestimoCalculado; p: ProximaParcela } => !!x.p && x.p.situacao !== 'em_dia')
+    const parcelasCriticas = parcelas
+      .filter(x => x.p.situacao === 'atrasada' || x.p.situacao === 'vence_hoje')
+      .sort((a, b) => a.p.data.localeCompare(b.p.data))
+
+    type Item =
+      | { kind: 'emp'; e: EmprestimoCalculado }
+      | { kind: 'cheque'; c: ChequeComCliente; situacao: SituacaoCheque }
+      | { kind: 'parcela'; e: EmprestimoCalculado; p: ProximaParcela }
+    const dataItem = (i: Item) => i.kind === 'emp' ? i.e.data_vencimento : i.kind === 'cheque' ? i.c.data_vencimento : i.p.data
     const proximos: Item[] = [
       ...proxVencimentos.map(e => ({ kind: 'emp' as const, e })),
       ...chequesAlerta.filter(x => x.situacao === 'vence_em_breve').map(x => ({ kind: 'cheque' as const, ...x })),
-    ].sort((a, b) =>
-      (a.kind === 'emp' ? a.e.data_vencimento : a.c.data_vencimento)
-        .localeCompare(b.kind === 'emp' ? b.e.data_vencimento : b.c.data_vencimento)
-    )
+      ...parcelas.filter(x => x.p.situacao === 'vence_em_breve').map(x => ({ kind: 'parcela' as const, ...x })),
+    ].sort((a, b) => dataItem(a).localeCompare(dataItem(b)))
 
     const itens: Item[] = [
+      ...parcelasCriticas.map(x => ({ kind: 'parcela' as const, ...x })),
       ...atrasados.sort((a, b) => b.dias_atraso - a.dias_atraso).map(e => ({ kind: 'emp' as const, e })),
       ...chequesCriticos.map(x => ({ kind: 'cheque' as const, ...x })),
       ...proximos,
     ]
     return itens.slice(0, 10)
-  }, [ativos, atrasados, chequesAbertos, hoje])
+  }, [ativos, atrasados, negociados, chequesAbertos, pagamentosPorEmp, hoje])
 
   return (
     <div className="p-4 md:p-8">
@@ -330,6 +342,9 @@ export function DashboardView({
             {urgentes.map(item => {
               if (item.kind === 'cheque') {
                 return <ChequeUrgenciaItem key={`cheque-${item.c.id}`} c={item.c} situacao={item.situacao} hoje={hoje} />
+              }
+              if (item.kind === 'parcela') {
+                return <ParcelaUrgenciaItem key={`parcela-${item.e.id}`} e={item.e} p={item.p} />
               }
               const e = item.e
               const jurosTotal = e.valor_juros * (1 + e.periodos_atraso)
@@ -381,6 +396,41 @@ function UrgenciaItem({ e, jurosRestante }: { e: EmprestimoCalculado; jurosResta
           }}
         >
           {e.situacao === 'atrasado' ? 'Atrasado' : 'Vence em breve'}
+        </Badge>
+      </div>
+    </Link>
+  )
+}
+
+function ParcelaUrgenciaItem({ e, p }: { e: EmprestimoCalculado; p: ProximaParcela }) {
+  const urgente = p.situacao === 'atrasada' || p.situacao === 'vence_hoje'
+  const color = urgente ? 'var(--destructive)' : '#8b5cf6'
+  const quando = p.situacao === 'atrasada'
+    ? `Parcela ${p.numero}/${p.total} venceu ${formatDate(p.data)} · ${-p.dias}d de atraso`
+    : p.situacao === 'vence_hoje'
+    ? `Parcela ${p.numero}/${p.total} vence hoje`
+    : `Parcela ${p.numero}/${p.total} vence ${formatDate(p.data)}`
+
+  return (
+    <Link
+      href="/emprestimos"
+      className="flex items-center justify-between rounded-xl px-3 py-2.5 transition-all duration-150 hover:brightness-125 active:scale-[0.99]"
+      style={{ background: 'var(--muted)' }}
+    >
+      <div>
+        <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>{e.cliente_nome}</p>
+        <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+          <Handshake className="w-3 h-3 inline mr-1" />
+          {quando}
+        </p>
+      </div>
+      <div className="text-right">
+        <p className="text-sm font-bold" style={{ color }}>{formatBRL(p.valor)}</p>
+        <Badge
+          className="text-xs mt-0.5"
+          style={{ background: `color-mix(in srgb, ${color} 15%, transparent)`, color, border: 'none' }}
+        >
+          {p.situacao === 'atrasada' ? 'Parcela atrasada' : p.situacao === 'vence_hoje' ? 'Parcela hoje' : 'Parcela em breve'}
         </Badge>
       </div>
     </Link>

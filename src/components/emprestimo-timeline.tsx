@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { AlertCircle, CheckCircle2, Clock, CreditCard, TrendingUp, Pencil, MessageSquarePlus, Trash2, Loader2 } from 'lucide-react'
 import { formatBRL, formatDate } from '@/lib/format'
 import { composicaoNegociado } from '@/lib/recebimentos'
+import { proximaParcelaNegociado } from '@/lib/negociado'
 import type { EmprestimoCalculado, Pagamento, AnotacaoEmprestimo } from '@/lib/types'
 
 function addDiasToDataString(dateStr: string, dias: number): string {
@@ -66,6 +67,11 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
   const negociado = e.status === 'negociado'
   const negociadoComValor = negociado && e.valor_negociado != null
   const retroativo = e.retroativo
+
+  // acordo negociado em parcelas com data: vence todo mês no mesmo dia
+  const parcela = negociadoComValor ? proximaParcelaNegociado(e, pagamentos, hoje) : null
+  const parcelaAtrasada = parcela?.situacao === 'atrasada'
+  const parcelaHoje = parcela?.situacao === 'vence_hoje'
 
   const pagoAtraso = pagamentos
     .filter(p => p.destino === 'atraso')
@@ -128,12 +134,16 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     ? Math.round(Math.max(0, e.valor_total_devido - pagoNegociado) * 100) / 100
     : Math.round((principalRestante + jurosRestante + moraRestante) * 100) / 100
 
-  const borderClass = atrasado && !jurosPago ? 'pulse-danger' : ''
+  // data em vermelho: empréstimo atrasado/vencendo hoje, ou parcela do
+  // acordo negociado vencida/vencendo hoje
+  const alertaVencimento = (atrasado && !emAberto) || venceHoje || parcelaAtrasada || parcelaHoje
+
+  const borderClass = (atrasado && !jurosPago) || parcelaAtrasada ? 'pulse-danger' : ''
   const borderColor = emAberto
     ? 'var(--border)'
-    : atrasado
+    : atrasado || parcelaAtrasada
     ? 'rgba(255,84,112,0.5)'
-    : venceHoje
+    : venceHoje || parcelaHoje
     ? 'var(--destructive)'
     : quitado
     ? 'rgba(0,229,204,0.3)'
@@ -167,7 +177,19 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
         type: 'quitado',
       })
     }
-  } else {
+  } else if (parcela) {
+    // acordo negociado: o vencimento que importa é o da parcela em aberto,
+    // não mais o do empréstimo original
+    timelineItems.push({
+      date: parcela.data,
+      label: parcelaHoje
+        ? `Parcela ${parcela.numero}/${parcela.total} vence hoje — ${formatBRL(parcela.valor)}`
+        : parcelaAtrasada
+        ? `Parcela ${parcela.numero}/${parcela.total} venceu em ${formatDate(parcela.data)} — ${-parcela.dias}d de atraso — ${formatBRL(parcela.valor)}`
+        : `Parcela ${parcela.numero}/${parcela.total} vence em ${formatDate(parcela.data)} — ${formatBRL(parcela.valor)}`,
+      type: 'vencimento',
+    })
+  } else if (!negociadoComValor || !e.data_primeira_parcela) {
     // Um item por período de vencimento: os já vencidos sem pagamento (histórico
     // de renovação) e o próximo — que vira uma nova renovação se não for pago.
     for (let periodo = 0; periodo <= e.periodos_atraso; periodo++) {
@@ -206,7 +228,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     if (type === 'pagamento') return 'var(--warning)'
     if (type === 'vencimento_passado') return 'var(--muted-foreground)'
     if (type === 'vencimento') {
-      if ((atrasado && !emAberto) || venceHoje) return 'var(--destructive)'
+      if (alertaVencimento) return 'var(--destructive)'
       return 'var(--muted-foreground)'
     }
     return 'var(--muted-foreground)'
@@ -217,15 +239,15 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     if (type === 'quitado') return <CheckCircle2 className="w-3 h-3" />
     if (type === 'pagamento') return <CreditCard className="w-3 h-3" />
     if (type === 'vencimento_passado') return <Clock className="w-3 h-3" />
-    if (type === 'vencimento' && ((atrasado && !emAberto) || venceHoje)) return <AlertCircle className="w-3 h-3" />
+    if (type === 'vencimento' && alertaVencimento) return <AlertCircle className="w-3 h-3" />
     return <Clock className="w-3 h-3" />
   }
 
   const situacaoColor = emAberto
     ? 'var(--primary)'
-    : atrasado
+    : atrasado || parcelaAtrasada
     ? 'var(--destructive)'
-    : venceHoje
+    : venceHoje || parcelaHoje
     ? 'var(--destructive)'
     : quitado
     ? '#00e5cc'
@@ -239,6 +261,10 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
     ? `Atrasado ${e.dias_atraso}d`
     : venceHoje
     ? 'Vence hoje'
+    : parcelaAtrasada
+    ? `Parcela atrasada ${-parcela!.dias}d`
+    : parcelaHoje
+    ? 'Parcela vence hoje'
     : quitado
     ? 'Quitado'
     : negociado
@@ -331,7 +357,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
                 className="text-xs"
                 style={{ background: `${situacaoColor}20`, color: situacaoColor, border: 'none' }}
               >
-                {atrasado && !emAberto && <AlertCircle className="w-3 h-3 mr-1" />}
+                {((atrasado && !emAberto) || parcelaAtrasada) && <AlertCircle className="w-3 h-3 mr-1" />}
                 {quitado && <CheckCircle2 className="w-3 h-3 mr-1" />}
                 {situacaoLabel}
               </Badge>
@@ -392,6 +418,20 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
                   <span style={{ color: 'var(--muted-foreground)' }}>Total negociado</span>
                   <span style={{ color: '#8b5cf6', fontWeight: 500 }}>{formatBRL(composicao.total)}</span>
                 </div>
+                {parcela ? (
+                  <div className="flex items-center gap-1.5">
+                    <span style={{ color: 'var(--muted-foreground)' }}>
+                      Próxima parcela ({parcela.numero}/{parcela.total})
+                    </span>
+                    <span style={{ color: parcelaAtrasada || parcelaHoje ? 'var(--destructive)' : 'var(--foreground)', fontWeight: 500 }}>
+                      {formatBRL(parcela.valor)} · {parcelaHoje ? 'hoje' : formatDate(parcela.data)}
+                    </span>
+                  </div>
+                ) : !e.data_primeira_parcela && (
+                  <p style={{ color: 'var(--muted-foreground)' }}>
+                    Sem data de vencimento das parcelas — edite o empréstimo e preencha &quot;Vencimento da 1ª parcela&quot; pra ser avisado no dia.
+                  </p>
+                )}
               </>
             ) : retroativo ? (
               <div className="flex items-center gap-1.5">
@@ -514,7 +554,7 @@ export const EmprestimoTimeline = memo(function EmprestimoTimeline({
                       <p
                         className="text-xs"
                         style={{
-                          color: isLast && ((atrasado && !emAberto) || venceHoje) ? 'var(--destructive)' : isLast && quitado ? '#00e5cc' : 'var(--foreground)',
+                          color: isLast && alertaVencimento ? 'var(--destructive)' : isLast && quitado ? '#00e5cc' : 'var(--foreground)',
                           fontWeight: isLast ? 600 : 400,
                         }}
                       >
