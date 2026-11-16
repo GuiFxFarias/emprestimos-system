@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -17,9 +17,12 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Camera, RefreshCw, Trash2, ImageOff } from 'lucide-react'
+import { toast } from 'sonner'
 import { formatBRL, formatDate } from '@/lib/format'
 import { diasParaVencer, hojeLocal, jurosCheque, entregueCheque } from '@/lib/cheques'
+import { TAMANHO_MAXIMO_ORIGINAL } from '@/lib/fotos-cheque'
+import { useFotoChequeUrl } from '@/components/cheque-foto'
 import type { Cheque, Cliente } from '@/lib/types'
 
 const schema = z.object({
@@ -37,6 +40,13 @@ const schema = z.object({
 })
 
 export type ChequeFormValues = z.infer<typeof schema>
+
+// O que fazer com a foto ao salvar: arquivo novo (substitui a atual), remover
+// a atual, ou manter como está
+export type FotoChequeAcao =
+  | { tipo: 'manter' }
+  | { tipo: 'nova'; arquivo: File; preview: string }
+  | { tipo: 'remover' }
 
 const PRAZOS_RAPIDOS = [30, 60, 90]
 
@@ -76,7 +86,7 @@ interface Props {
   cheque: Cheque | null
   clientes: Cliente[]
   onClose: () => void
-  onSubmit: (values: ChequeFormValues) => Promise<void>
+  onSubmit: (values: ChequeFormValues, foto: FotoChequeAcao) => Promise<void>
   saving: boolean
   // pré-seleciona o cliente ao cadastrar de dentro da tela dele
   defaultClienteId?: string
@@ -88,8 +98,13 @@ export function ChequeDialog({ open, cheque, clientes, onClose, onSubmit, saving
     defaultValues: valoresIniciais(cheque, defaultClienteId),
   })
 
+  const [foto, setFoto] = useState<FotoChequeAcao>({ tipo: 'manter' })
+
   useEffect(() => {
-    if (open) form.reset(valoresIniciais(cheque, defaultClienteId))
+    if (open) {
+      form.reset(valoresIniciais(cheque, defaultClienteId))
+      setFoto({ tipo: 'manter' })
+    }
   }, [open, cheque?.id, defaultClienteId])
 
   const watched = form.watch()
@@ -116,7 +131,7 @@ export function ChequeDialog({ open, cheque, clientes, onClose, onSubmit, saving
           </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-4 mt-2">
+        <form onSubmit={form.handleSubmit(v => onSubmit(v, foto))} className="flex flex-col gap-4 mt-2">
           <div className="flex flex-col gap-1.5">
             <Label style={labelStyle}>Cliente *</Label>
             <Controller
@@ -206,6 +221,12 @@ export function ChequeDialog({ open, cheque, clientes, onClose, onSubmit, saving
             </div>
           </div>
 
+          <FotoChequeCampo
+            fotoAtual={cheque?.foto_url ?? null}
+            acao={foto}
+            onChange={setFoto}
+          />
+
           <div className="flex flex-col gap-1.5">
             <Label style={labelStyle}>Observações</Label>
             <Textarea
@@ -253,6 +274,90 @@ export function ChequeDialog({ open, cheque, clientes, onClose, onSubmit, saving
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+interface FotoCampoProps {
+  fotoAtual: string | null
+  acao: FotoChequeAcao
+  onChange: (acao: FotoChequeAcao) => void
+}
+
+function FotoChequeCampo({ fotoAtual, acao, onChange }: FotoCampoProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const arquivoNovo = acao.tipo === 'nova' ? acao.arquivo : null
+  const previewNovo = acao.tipo === 'nova' ? acao.preview : null
+  const atual = useFotoChequeUrl(acao.tipo === 'manter' ? fotoAtual : null)
+
+  // libera a object URL do preview quando trocar de arquivo ou fechar
+  useEffect(() => {
+    if (!previewNovo) return
+    return () => URL.revokeObjectURL(previewNovo)
+  }, [previewNovo])
+
+  function escolher(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // permite escolher o mesmo arquivo de novo
+    if (!file) return
+    if (!file.type.startsWith('image/')) { toast.error('Escolha um arquivo de imagem'); return }
+    if (file.size > TAMANHO_MAXIMO_ORIGINAL) { toast.error('Imagem muito grande (máx. 25 MB)'); return }
+    onChange({ tipo: 'nova', arquivo: file, preview: URL.createObjectURL(file) })
+  }
+
+  const src = previewNovo ?? (acao.tipo === 'manter' ? atual.url : null)
+  const temFoto = !!arquivoNovo || (acao.tipo === 'manter' && !!fotoAtual)
+  const labelStyle = { color: 'var(--muted-foreground)' }
+  const btnStyle = { borderColor: 'var(--border)', color: 'var(--foreground)' }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label style={labelStyle}>Foto do cheque</Label>
+      {/* sem `capture`: no celular abre a escolha entre câmera e galeria */}
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={escolher} />
+
+      {temFoto ? (
+        <div className="flex items-center gap-3">
+          <div
+            className="w-24 h-16 rounded-lg overflow-hidden border flex items-center justify-center shrink-0"
+            style={{ background: 'var(--muted)', borderColor: 'var(--border)' }}
+          >
+            {src ? (
+              // eslint-disable-next-line @next/next/no-img-element -- preview local / URL assinada
+              <img src={src} alt="Foto do cheque" className="w-full h-full object-cover" />
+            ) : atual.erro ? (
+              <ImageOff className="w-5 h-5" style={labelStyle} />
+            ) : (
+              <Loader2 className="w-4 h-4 animate-spin" style={labelStyle} />
+            )}
+          </div>
+          <div className="flex flex-col gap-1.5 items-start">
+            <Button type="button" variant="outline" size="sm" className="gap-1.5" style={btnStyle}
+              onClick={() => inputRef.current?.click()}>
+              <RefreshCw className="w-3.5 h-3.5" /> Trocar foto
+            </Button>
+            <Button type="button" variant="ghost" size="sm" className="gap-1.5 hover:bg-destructive/10"
+              style={{ color: 'var(--destructive)' }}
+              // arquivo recém-escolhido: volta pro estado salvo; senão, remove a foto salva
+              onClick={() => onChange(arquivoNovo ? { tipo: 'manter' } : { tipo: 'remover' })}>
+              <Trash2 className="w-3.5 h-3.5" /> {arquivoNovo && fotoAtual ? 'Desfazer troca' : 'Remover'}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="outline" className="gap-2 w-fit" style={btnStyle}
+            onClick={() => inputRef.current?.click()}>
+            <Camera className="w-4 h-4" /> Tirar / anexar foto
+          </Button>
+          {acao.tipo === 'remover' && (
+            <button type="button" className="text-xs underline cursor-pointer" style={labelStyle}
+              onClick={() => onChange({ tipo: 'manter' })}>
+              Desfazer remoção
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 

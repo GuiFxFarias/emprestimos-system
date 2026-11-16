@@ -109,6 +109,7 @@ create table if not exists public.cheques (
                       check (status in ('a_compensar', 'compensado', 'devolvido')),
   data_compensacao  date,
   observacoes       text,
+  foto_url          text,  -- caminho no bucket 'fotos-cheques'
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
@@ -355,6 +356,35 @@ create policy "fotos_update_own" on storage.objects
 create policy "fotos_delete_own" on storage.objects
   for delete using (
     bucket_id = 'fotos-clientes'
+    and auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+-- Bucket privado para fotos dos cheques (owner_id/cheque_id/arquivo.jpg)
+insert into storage.buckets (id, name, public)
+values ('fotos-cheques', 'fotos-cheques', false)
+on conflict (id) do nothing;
+
+create policy "fotos_cheques_select_own" on storage.objects
+  for select using (
+    bucket_id = 'fotos-cheques'
+    and auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+create policy "fotos_cheques_insert_own" on storage.objects
+  for insert with check (
+    bucket_id = 'fotos-cheques'
+    and auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+create policy "fotos_cheques_update_own" on storage.objects
+  for update using (
+    bucket_id = 'fotos-cheques'
+    and auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+create policy "fotos_cheques_delete_own" on storage.objects
+  for delete using (
+    bucket_id = 'fotos-cheques'
     and auth.uid()::text = (storage.foldername(name))[1]
   );
 
