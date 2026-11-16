@@ -10,7 +10,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { MetricCard } from '@/components/metric-card'
-import { ChequeDialog, CompensarChequeDialog, type ChequeFormValues } from '@/components/cheque-dialog'
+import { ChequeDialog, CompensarChequeDialog, type ChequeFormValues, type FotoChequeAcao } from '@/components/cheque-dialog'
+import { ChequeFotoDialog } from '@/components/cheque-foto'
+import { enviarFotoCheque, removerFotoCheque } from '@/lib/fotos-cheque'
 import { ClienteChequeCard, type ClienteChequeStats } from '@/components/cliente-cheque-card'
 import { ClienteAvatar } from '@/components/cliente-avatar'
 import {
@@ -37,6 +39,7 @@ import {
   AlertCircle,
   Wallet,
   DollarSign,
+  ImageIcon,
 } from 'lucide-react'
 import type { Cheque, ChequeComCliente, ChequeStatus, Cliente } from '@/lib/types'
 
@@ -60,6 +63,7 @@ export function ChequesView({ initialCheques, initialClientes }: Props) {
   const [dialogAberto, setDialogAberto] = useState(false)
   const [editando, setEditando] = useState<Cheque | null>(null)
   const [compensando, setCompensando] = useState<Cheque | null>(null)
+  const [vendoFoto, setVendoFoto] = useState<Cheque | null>(null)
 
   const { data: cheques = [] } = useQuery({
     queryKey: queryKeys.cheques(),
@@ -163,8 +167,10 @@ export function ChequesView({ initialCheques, initialClientes }: Props) {
   }
 
   const salvarMutation = useMutation({
-    mutationFn: async (values: ChequeFormValues) => {
+    mutationFn: async ({ values, foto }: { values: ChequeFormValues; foto: FotoChequeAcao }) => {
       const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Sessão expirada, entre novamente')
       const payload = {
         cliente_id: values.cliente_id,
         valor: values.valor,
@@ -176,16 +182,41 @@ export function ChequesView({ initialCheques, initialClientes }: Props) {
         observacoes: values.observacoes?.trim() || null,
       }
       if (editando) {
-        const { error } = await supabase.from('cheques').update(payload).eq('id', editando.id)
-        if (error) throw new Error(error.message)
-      } else {
-        const { data: { user } } = await supabase.auth.getUser()
-        const { error } = await supabase.from('cheques').insert({ owner_id: user!.id, ...payload })
-        if (error) throw new Error(error.message)
+        const fotoAntiga = editando.foto_url
+        let foto_url = fotoAntiga
+        if (foto.tipo === 'nova') foto_url = await enviarFotoCheque(user.id, editando.id, foto.arquivo)
+        if (foto.tipo === 'remover') foto_url = null
+        const { error } = await supabase.from('cheques').update({ ...payload, foto_url }).eq('id', editando.id)
+        if (error) {
+          // não deixa a foto recém-enviada órfã no bucket
+          if (foto_url !== fotoAntiga) await removerFotoCheque(foto_url)
+          throw new Error(error.message)
+        }
+        if (fotoAntiga && foto_url !== fotoAntiga) await removerFotoCheque(fotoAntiga)
+        return { fotoFalhou: false }
+      }
+
+      const { data: novo, error } = await supabase
+        .from('cheques')
+        .insert({ owner_id: user.id, ...payload })
+        .select('id')
+        .single()
+      if (error || !novo) throw new Error(error?.message ?? 'Erro desconhecido')
+      if (foto.tipo !== 'nova') return { fotoFalhou: false }
+
+      // o cheque já está salvo: se a foto falhar, avisa e deixa anexar depois pelo "editar"
+      try {
+        const foto_url = await enviarFotoCheque(user.id, novo.id, foto.arquivo)
+        const { error: errFoto } = await supabase.from('cheques').update({ foto_url }).eq('id', novo.id)
+        if (errFoto) { await removerFotoCheque(foto_url); throw errFoto }
+        return { fotoFalhou: false }
+      } catch {
+        return { fotoFalhou: true }
       }
     },
-    onSuccess: () => {
-      toast.success(editando ? 'Cheque atualizado!' : 'Cheque cadastrado!')
+    onSuccess: ({ fotoFalhou }) => {
+      if (fotoFalhou) toast.warning('Cheque cadastrado, mas a foto não foi enviada. Tente anexar de novo em "Editar".')
+      else toast.success(editando ? 'Cheque atualizado!' : 'Cheque cadastrado!')
       fecharDialog()
       invalidate()
     },
@@ -213,10 +244,11 @@ export function ChequesView({ initialCheques, initialClientes }: Props) {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async (cheque: Cheque) => {
       const supabase = createClient()
-      const { error } = await supabase.from('cheques').delete().eq('id', id)
+      const { error } = await supabase.from('cheques').delete().eq('id', cheque.id)
       if (error) throw new Error(error.message)
+      await removerFotoCheque(cheque.foto_url)
     },
     onSuccess: () => {
       toast.success('Cheque excluído!')
@@ -242,7 +274,7 @@ export function ChequesView({ initialCheques, initialClientes }: Props) {
         cheque={editando}
         clientes={clientes}
         onClose={fecharDialog}
-        onSubmit={async v => { salvarMutation.mutate(v) }}
+        onSubmit={async (values, foto) => { salvarMutation.mutate({ values, foto }) }}
         saving={salvarMutation.isPending}
         defaultClienteId={selectedClienteId ?? undefined}
       />
@@ -254,6 +286,12 @@ export function ChequesView({ initialCheques, initialClientes }: Props) {
           if (compensando) statusMutation.mutate({ id: compensando.id, status: 'compensado', data_compensacao: data })
         }}
         saving={statusMutation.isPending}
+      />
+
+      <ChequeFotoDialog
+        path={vendoFoto?.foto_url ?? null}
+        titulo={vendoFoto ? tituloCheque(vendoFoto) : undefined}
+        onClose={() => setVendoFoto(null)}
       />
     </>
   )
@@ -433,7 +471,8 @@ export function ChequesView({ initialCheques, initialClientes }: Props) {
               hoje={hoje}
               busy={statusMutation.isPending}
               onEdit={() => { setEditando(c); setDialogAberto(true) }}
-              onDelete={async () => { await deleteMutation.mutateAsync(c.id).catch(() => {}) }}
+              onDelete={async () => { await deleteMutation.mutateAsync(c).catch(() => {}) }}
+              onVerFoto={() => setVendoFoto(c)}
               onCompensar={() => setCompensando(c)}
               onDevolvido={() => statusMutation.mutate({ id: c.id, status: 'devolvido', data_compensacao: null })}
               onReabrir={() => statusMutation.mutate({ id: c.id, status: 'a_compensar', data_compensacao: null })}
@@ -447,18 +486,23 @@ export function ChequesView({ initialCheques, initialClientes }: Props) {
   )
 }
 
+function tituloCheque(c: Pick<Cheque, 'banco' | 'numero'>): string {
+  return [c.banco, c.numero && `nº ${c.numero}`].filter(Boolean).join(' · ') || 'Cheque'
+}
+
 interface ChequeCardProps {
   cheque: ChequeComCliente
   hoje: string
   busy: boolean
   onEdit: () => void
   onDelete: () => Promise<void>
+  onVerFoto: () => void
   onCompensar: () => void
   onDevolvido: () => void
   onReabrir: () => void
 }
 
-function ChequeCard({ cheque: c, hoje, busy, onEdit, onDelete, onCompensar, onDevolvido, onReabrir }: ChequeCardProps) {
+function ChequeCard({ cheque: c, hoje, busy, onEdit, onDelete, onVerFoto, onCompensar, onDevolvido, onReabrir }: ChequeCardProps) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
@@ -498,7 +542,7 @@ function ChequeCard({ cheque: c, hoje, busy, onEdit, onDelete, onCompensar, onDe
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-semibold text-sm truncate" style={{ color: 'var(--foreground)' }}>
-            {[c.banco, c.numero && `nº ${c.numero}`].filter(Boolean).join(' · ') || 'Cheque'}
+            {tituloCheque(c)}
           </p>
           <p className="text-xs" style={mutedStyle}>
             Trocado em {formatDate(c.data_entrada)}
@@ -564,6 +608,12 @@ function ChequeCard({ cheque: c, hoje, busy, onEdit, onDelete, onCompensar, onDe
               className={`${iconBtn} hover:bg-primary/10`} style={mutedStyle} title="Editar">
               <Pencil className="w-3.5 h-3.5" />
             </Button>
+            {c.foto_url && (
+              <Button size="sm" variant="outline" onClick={onVerFoto}
+                className="h-7 px-2.5 text-xs gap-1" style={{ borderColor: 'var(--border)', color: 'var(--foreground)' }}>
+                <ImageIcon className="w-3.5 h-3.5" /> Foto
+              </Button>
+            )}
             {c.status === 'compensado' ? (
               <Button size="sm" variant="outline" disabled={busy} onClick={onReabrir}
                 className="h-7 px-2.5 text-xs gap-1" style={{ borderColor: 'var(--border)', color: 'var(--foreground)' }}>

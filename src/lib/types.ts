@@ -116,6 +116,8 @@ export interface Cheque {
   status: ChequeStatus
   data_compensacao: string | null
   observacoes: string | null
+  // caminho do arquivo no bucket 'fotos-cheques' (não é URL pública)
+  foto_url: string | null
   created_at: string
   updated_at: string
 }
