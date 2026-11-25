@@ -12,6 +12,9 @@ export interface Cliente {
   endereco: string | null
   observacoes: string | null
   foto_url: string | null
+  cnh_url: string | null
+  comprovante_residencia_url: string | null
+  holerite_url: string | null
   created_at: string
   updated_at: string
 }
