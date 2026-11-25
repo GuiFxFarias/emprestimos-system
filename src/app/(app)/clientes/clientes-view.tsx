@@ -22,6 +22,19 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { ClienteAvatar } from '@/components/cliente-avatar'
+import {
+  DocumentoClienteDialog,
+  DocumentosChips,
+  DocumentosClienteCampos,
+  type DocumentoAberto,
+} from '@/components/documentos-cliente'
+import {
+  ACOES_INICIAIS,
+  TIPOS_DOCUMENTO,
+  aplicarAcoesDocumentos,
+  removerDocumentosCliente,
+  type DocumentosAcoes,
+} from '@/lib/documentos-cliente'
 import { Users, Plus, Search, Pencil, Trash2, Loader2, Phone, FileText, Camera } from 'lucide-react'
 import type { Cliente, EmprestimoCalculado } from '@/lib/types'
 
@@ -51,6 +64,9 @@ export function ClientesView({ initialClientes, initialEmprestimos }: Props) {
   const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingFotoUrl, setEditingFotoUrl] = useState<string | null>(null)
+  const [editingCliente, setEditingCliente] = useState<Cliente | null>(null)
+  const [docsAcoes, setDocsAcoes] = useState<DocumentosAcoes>(ACOES_INICIAIS)
+  const [vendoDoc, setVendoDoc] = useState<DocumentoAberto | null>(null)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [foto, setFoto] = useState<File | null>(null)
   const [fotoPreview, setFotoPreview] = useState<string | null>(null)
@@ -104,6 +120,8 @@ export function ClientesView({ initialClientes, initialEmprestimos }: Props) {
   function openCreate() {
     setEditingId(null)
     setEditingFotoUrl(null)
+    setEditingCliente(null)
+    setDocsAcoes(ACOES_INICIAIS)
     setFoto(null)
     setFotoPreview(null)
     reset({ nome: '', telefone: '', documento: '', endereco: '', observacoes: '' })
@@ -113,6 +131,8 @@ export function ClientesView({ initialClientes, initialEmprestimos }: Props) {
   function openEdit(c: ClienteComStats) {
     setEditingId(c.id)
     setEditingFotoUrl(c.foto_url)
+    setEditingCliente(c)
+    setDocsAcoes(ACOES_INICIAIS)
     setFoto(null)
     setFotoPreview(null)
     reset({
@@ -158,8 +178,16 @@ export function ClientesView({ initialClientes, initialEmprestimos }: Props) {
       if (editingId) {
         let foto_url = editingFotoUrl
         if (foto) foto_url = await uploadFoto(user!.id, editingId, foto)
-        const { error } = await supabase.from('clientes').update({ ...payload, foto_url }).eq('id', editingId)
-        if (error) throw new Error(error.message)
+        const docs = await aplicarAcoesDocumentos(user!.id, editingId, editingCliente, docsAcoes)
+        const { error } = await supabase
+          .from('clientes')
+          .update({ ...payload, foto_url, ...docs.colunas })
+          .eq('id', editingId)
+        if (error) {
+          await removerDocumentosCliente(docs.enviados)
+          throw new Error(error.message)
+        }
+        await removerDocumentosCliente(docs.antigos)
       } else {
         const { data: novo, error } = await supabase
           .from('clientes')
@@ -173,6 +201,21 @@ export function ClientesView({ initialClientes, initialEmprestimos }: Props) {
           if (foto_url) {
             await supabase.from('clientes').update({ foto_url }).eq('id', novo.id)
           }
+        }
+
+        // Cliente já foi criado: se os documentos falharem, avisa sem lançar
+        // (lançar deixaria o form aberto e um novo "Criar" duplicaria o cliente)
+        try {
+          const docs = await aplicarAcoesDocumentos(user!.id, novo.id, null, docsAcoes)
+          if (docs.enviados.length > 0) {
+            const { error: errDocs } = await supabase.from('clientes').update(docs.colunas).eq('id', novo.id)
+            if (errDocs) {
+              await removerDocumentosCliente(docs.enviados)
+              throw new Error(errDocs.message)
+            }
+          }
+        } catch (err) {
+          toast.error('Cliente criado, mas os documentos não foram salvos: ' + (err as Error).message)
         }
       }
     },
@@ -191,6 +234,8 @@ export function ClientesView({ initialClientes, initialEmprestimos }: Props) {
       const supabase = createClient()
       const { error } = await supabase.from('clientes').delete().eq('id', id)
       if (error) throw error
+      const cliente = clientes.find(c => c.id === id)
+      if (cliente) await removerDocumentosCliente(TIPOS_DOCUMENTO.map(d => cliente[d.coluna]))
     },
     onSuccess: () => {
       toast.success('Cliente excluído!')
@@ -287,6 +332,7 @@ export function ClientesView({ initialClientes, initialEmprestimos }: Props) {
                     </span>
                   )}
                 </div>
+                <DocumentosChips cliente={c} onAbrir={setVendoDoc} />
                 {c.emprestimos_ativos > 0 && (
                   <p className="text-xs mt-1 font-medium" style={{ color: 'var(--accent-2, #00e5cc)' }}>
                     Total devido: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(c.total_devido)}
@@ -318,7 +364,10 @@ export function ClientesView({ initialClientes, initialEmprestimos }: Props) {
 
       {/* Create / Edit Dialog */}
       <Dialog open={open} onOpenChange={v => { if (!v) { setOpen(false); setFoto(null); setFotoPreview(null) } }}>
-        <DialogContent style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--foreground)' }}>
+        <DialogContent
+          className="max-h-[90vh] overflow-y-auto"
+          style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
+        >
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--foreground)' }}>
               {editingId ? 'Editar cliente' : 'Novo cliente'}
@@ -366,6 +415,12 @@ export function ClientesView({ initialClientes, initialEmprestimos }: Props) {
               <Label style={{ color: 'var(--muted-foreground)' }}>Observações</Label>
               <Textarea rows={3} placeholder="Informações adicionais sobre o cliente..." {...register('observacoes')} style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }} />
             </div>
+            <DocumentosClienteCampos
+              cliente={editingCliente}
+              acoes={docsAcoes}
+              onChange={(tipo, acao) => setDocsAcoes(prev => ({ ...prev, [tipo]: acao }))}
+              onVer={setVendoDoc}
+            />
             <DialogFooter className="mt-2">
               <Button type="button" variant="outline" onClick={() => setOpen(false)} style={{ borderColor: 'var(--border)', color: 'var(--foreground)' }}>
                 Cancelar
@@ -377,6 +432,8 @@ export function ClientesView({ initialClientes, initialEmprestimos }: Props) {
           </form>
         </DialogContent>
       </Dialog>
+
+      <DocumentoClienteDialog doc={vendoDoc} onClose={() => setVendoDoc(null)} />
 
       {/* Delete confirmation */}
       <Dialog open={!!deleteId} onOpenChange={v => { if (!v) setDeleteId(null) }}>

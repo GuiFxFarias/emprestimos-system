@@ -29,6 +29,9 @@ create table if not exists public.clientes (
   endereco    text,
   observacoes text,
   foto_url    text,
+  cnh_url                    text,  -- caminhos no bucket 'documentos-clientes'
+  comprovante_residencia_url text,
+  holerite_url               text,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
@@ -385,6 +388,36 @@ create policy "fotos_cheques_update_own" on storage.objects
 create policy "fotos_cheques_delete_own" on storage.objects
   for delete using (
     bucket_id = 'fotos-cheques'
+    and auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+-- Bucket privado para documentos dos clientes: CNH, comprovante de
+-- residência e holerite (owner_id/cliente_id/tipo-timestamp.ext)
+insert into storage.buckets (id, name, public)
+values ('documentos-clientes', 'documentos-clientes', false)
+on conflict (id) do nothing;
+
+create policy "documentos_clientes_select_own" on storage.objects
+  for select using (
+    bucket_id = 'documentos-clientes'
+    and auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+create policy "documentos_clientes_insert_own" on storage.objects
+  for insert with check (
+    bucket_id = 'documentos-clientes'
+    and auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+create policy "documentos_clientes_update_own" on storage.objects
+  for update using (
+    bucket_id = 'documentos-clientes'
+    and auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+create policy "documentos_clientes_delete_own" on storage.objects
+  for delete using (
+    bucket_id = 'documentos-clientes'
     and auth.uid()::text = (storage.foldername(name))[1]
   );
 
